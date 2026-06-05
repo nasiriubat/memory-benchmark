@@ -1,0 +1,96 @@
+# =============================================================================
+# memory-agent-benchmark — Git ignore
+# =============================================================================
+
+# --- Secrets (never commit) ---------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.yaml
+secrets.yml
+
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+.installed.cfg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# --- Benchmark outputs (keep directory structure) -----------------------------
+results/*
+!results/.gitkeep
+
+# Local SQLite mirrors (if enabled)
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Hugging Face / dataset caches (local downloads) --------------------------
+.cache/
+.huggingface/
+datasets_cache/
+
+# --- Logs ---------------------------------------------------------------------
+*.log
+logs/
+
+# --- OS / editor --------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+*.sublime-project
+*.sublime-workspace
+
+# Cursor local agent state (keep committed rules if you add them under .cursor/rules/)
+.cursor/
+
+# --- Docker (local overrides only) --------------------------------------------
+docker-compose.override.yml
+docker-compose.local.yml
+
+# --- Optional: large local reference files (uncomment if needed) --------------
+# *.pdf

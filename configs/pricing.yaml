@@ -1,0 +1,33 @@
+# Fallback pricing table (USD per 1,000,000 tokens).
+#
+# IMPORTANT: For OpenRouter runs, cost is computed from the LIVE OpenRouter
+# model-catalog pricing captured in
+# results/model_snapshots/{run_id}/resolved_models.yaml. This file is only a
+# FALLBACK used when catalog pricing is unavailable (e.g. fully offline runs).
+# Do not treat these numbers as authoritative.
+pricing:
+  default:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0
+  # Optional per-provider-family fallbacks (illustrative, override as needed).
+  openai:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0
+  anthropic:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0
+  google:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0
+  meta:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0
+  deepseek:
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    cached_input_per_1m: 0.0

@@ -1,0 +1,74 @@
+# Top-level benchmark configuration.
+#
+# Scale presets (set BENCHMARK_PROFILE in .env): paper | full | smoke
+run:
+  num_runs: 5
+  retrieve_top_k: 3
+  model_parallelism: 1
+  task_parallelism: 1
+  fail_fast: false
+  cross_task_memory: false
+  max_tasks_per_domain: 0
+
+profiles:
+  paper:
+    num_runs: 5
+    max_tasks_per_domain: 50
+  full:
+    num_runs: 5
+    max_tasks_per_domain: 0
+  smoke:
+    num_runs: 1
+    max_tasks_per_domain: 1
+    benchmarks:
+      state_bench:
+        enabled: true
+      memoryarena:
+        enabled: false
+      dfx:
+        enabled: false
+
+benchmarks:
+  state_bench:
+    enabled: true
+    # Microsoft STATE-Bench Agent Learning Track domains.
+    domains:
+      - travel
+      - customer_support
+      - shopping_assistant
+    # Number of test repetitions; passed to the official runner when available.
+    num_runs: 5
+    retrieve_learnings_top_k: 3
+  memoryarena:
+    enabled: true
+    configs:
+      - bundled_shopping
+      - progressive_search
+      - group_travel_planner
+      - formal_reasoning_math
+      - formal_reasoning_phys
+    # Hugging Face fallback dataset used only if the official repo is absent.
+    hf_dataset: ZexueHe/memoryarena
+  dfx:
+    enabled: false
+    path: data/dfx
+
+# Evaluator configuration.
+evaluators:
+  # Judge model slot (resolved like any other model via the resolver).
+  llm_judge_model: openai_frontier
+  # Prefer official benchmark scores, then deterministic checks, then judge.
+  rule_compliance_order: ["official", "deterministic", "llm_judge"]
+
+# Statistical analysis (paper Section III-J).
+statistics:
+  enabled: true
+  # Use resolved OpenRouter model ids (model_display) for backbone comparisons (RQ3).
+  anova_factors: ["memory_system", "model_display"]
+  anova_metrics:
+    - success
+    - score
+    - progress_score
+    - consistency_score
+    - memory_utility_gain_vs_stateless
+  alpha: 0.05

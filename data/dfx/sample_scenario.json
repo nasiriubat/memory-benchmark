@@ -1,0 +1,45 @@
+{
+  "id": "dfx_bracket_redesign_sample",
+  "domain": "mechanical_design",
+  "backgrounds": [
+    "A mounting bracket must be redesigned for a consumer electronics enclosure.",
+    "This scenario is illustrative and abstracted. It contains no confidential or company-specific data."
+  ],
+  "gold_memory_facts": [
+    "material must be recyclable aluminum",
+    "unit cost ceiling is 4.50 EUR",
+    "assembly must use no more than 2 fasteners",
+    "engineer accepted the snap-fit decision in subtask 2"
+  ],
+  "subtasks": [
+    {
+      "id": "st1_goal",
+      "question": "Goal: propose an initial bracket concept. The constraint is that the material must be recyclable aluminum and the unit cost ceiling is 4.50 EUR. Summarize the initial concept and the two active constraints.",
+      "expected_answer": "recyclable aluminum bracket under 4.50 EUR",
+      "constraints": ["material must be recyclable aluminum", "unit cost ceiling is 4.50 EUR"],
+      "expected_facts": ["recyclable aluminum", "4.50 EUR cost ceiling"]
+    },
+    {
+      "id": "st2_feedback",
+      "question": "Engineer feedback: reduce assembly effort to at most 2 fasteners. Decision accepted: use a snap-fit feature to remove one fastener. Update the concept while keeping all earlier constraints.",
+      "expected_answer": "snap-fit with at most 2 fasteners, still recyclable aluminum under 4.50 EUR",
+      "user_feedback": ["reduce assembly to at most 2 fasteners"],
+      "accepted_decisions": ["use a snap-fit feature to remove one fastener"],
+      "constraints": ["assembly must use no more than 2 fasteners"],
+      "expected_facts": ["snap-fit feature", "max 2 fasteners"]
+    },
+    {
+      "id": "st3_reuse",
+      "question": "New requirement: add a cable clip. Produce a revised recommendation. It must remain consistent with all earlier constraints, feedback, and the accepted snap-fit decision.",
+      "expected_answer": "cable clip added, snap-fit retained, recyclable aluminum, at most 2 fasteners, under 4.50 EUR",
+      "prior_recommendations": ["snap-fit recyclable aluminum bracket under 4.50 EUR with max 2 fasteners"],
+      "expected_facts": ["cable clip", "snap-fit retained", "recyclable aluminum", "max 2 fasteners"]
+    },
+    {
+      "id": "st4_consistency_check",
+      "question": "Final check: state whether your revised design violates any earlier constraint or decision, and confirm the material, cost ceiling, fastener count, and snap-fit decision.",
+      "expected_answer": "no violations; recyclable aluminum, under 4.50 EUR, max 2 fasteners, snap-fit retained",
+      "expected_facts": ["no violations", "recyclable aluminum", "4.50 EUR", "max 2 fasteners", "snap-fit"]
+    }
+  ]
+}

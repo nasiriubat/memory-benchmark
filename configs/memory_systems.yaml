@@ -1,0 +1,57 @@
+# Memory system registry. Each entry maps a memory system id to its adapter
+# class and self-hosted connection settings. Adapters degrade gracefully and
+# log "unavailable" if the SDK/package is missing or the backend is unreachable.
+#
+# Connection details (base_url / api_key) are read from environment variables
+# referenced here, NEVER hard-coded.
+memory_systems:
+  stateless:
+    adapter: benchmark.memory.stateless:StatelessAdapter
+    description: "No persistent memory. Required baseline for memory-utility gain."
+    self_hosted: false
+    always_available: true
+
+  hindsight:
+    adapter: benchmark.memory.hindsight:HindsightAdapter
+    description: "Reflection-oriented memory."
+    self_hosted: true
+    base_url_env: HINDSIGHT_BASE_URL
+    api_key_env: HINDSIGHT_API_KEY
+
+  acontext:
+    adapter: benchmark.memory.acontext:AContextAdapter
+    description: "Skill-based memory."
+    self_hosted: true
+    base_url_env: ACONTEXT_BASE_URL
+    api_key_env: ACONTEXT_API_KEY
+
+  mem0:
+    adapter: benchmark.memory.mem0:Mem0Adapter
+    description: "Managed long-term memory (self-hosted with Qdrant vector store)."
+    self_hosted: true
+    base_url_env: MEM0_BASE_URL
+    api_key_env: MEM0_API_KEY
+
+  zep:
+    adapter: benchmark.memory.zep:ZepAdapter
+    description: "Temporal knowledge-graph memory (Zep Community Edition)."
+    self_hosted: true
+    base_url_env: ZEP_BASE_URL
+    api_key_env: ZEP_API_KEY
+
+  supermemory:
+    adapter: benchmark.memory.supermemory:SupermemoryAdapter
+    description: "Retrieval-based persistent memory."
+    self_hosted: true
+    base_url_env: SUPERMEMORY_BASE_URL
+    api_key_env: SUPERMEMORY_API_KEY
+
+  # Optional, disabled by default. Built-in proprietary memory (paper Table I).
+  # To be completed with the industrial partner.
+  automemory:
+    adapter: benchmark.memory.automemory:AutoMemoryAdapter
+    description: "Built-in proprietary memory (AutoMemory/AutoDream). Optional."
+    enabled: false
+    self_hosted: true
+    base_url_env: AUTOMEMORY_BASE_URL
+    api_key_env: AUTOMEMORY_API_KEY

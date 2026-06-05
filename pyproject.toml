@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memory-agent-benchmark"
+version = "0.1.0"
+description = "Reproducible benchmark harness comparing LLM agent memory systems across models on STATE-Bench, MemoryArena, and DFx scenarios."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Memory Matters (ICSE TR)" }]
+
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "rich>=13.7",
+    "typer>=0.12",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "tenacity>=8.2",
+    "pandas>=2.2",
+    "pyarrow>=15.0",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "statsmodels>=0.14",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Real memory-system SDKs. Adapters degrade gracefully when these are missing.
+memory = [
+    "mem0ai>=0.1.0",
+    "zep-python>=2.0",
+]
+memory-hindsight = [
+    "hindsight-all>=0.6",
+]
+# Streamlit dashboard.
+ui = [
+    "streamlit>=1.36",
+    "plotly>=5.22",
+]
+# Optional Hugging Face fallback dataset loading for MemoryArena.
+datasets = [
+    "datasets>=2.19",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+memory-benchmark = "benchmark.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

@@ -1,0 +1,42 @@
+# OpenRouter routing policy.
+#
+# strict_benchmark_mode: true means
+#   1. resolve model aliases once
+#   2. use concrete model ids afterward
+#   3. disable fallback routing where possible
+#   4. require requested parameters to be supported
+#   5. deny data collection when OpenRouter supports that preference
+#   6. log all routing metadata
+#
+# For smoke tests you may relax these (see the commented block at the bottom).
+openrouter:
+  base_url: "https://openrouter.ai/api/v1"
+  api_key_env: "OPENROUTER_API_KEY"
+  app_title: "memory-agent-benchmark"
+  http_referer_env: "OPENROUTER_HTTP_REFERER"
+  use_latest_aliases: true
+  resolve_latest_once_per_run: true
+  use_concrete_model_after_resolution: true
+  fail_if_model_unavailable: false
+  strict_benchmark_mode: true
+  provider:
+    allow_fallbacks: false
+    require_parameters: true
+    data_collection: "deny"
+    sort: null
+
+# Models/routing patterns that must NOT be used for controlled experiments.
+forbidden_for_benchmark:
+  - "openrouter/auto"
+  - "openrouter/fusion"
+  - "random_cheapest_routing"
+  - "cross_family_fallback_lists"
+
+# Smoke-test profile (not for final/paper runs):
+# smoke:
+#   strict_benchmark_mode: false
+#   provider:
+#     allow_fallbacks: true
+#     require_parameters: false
+#     data_collection: "allow"
+#     sort: "price"

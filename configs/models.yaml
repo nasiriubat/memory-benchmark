@@ -1,0 +1,96 @@
+# LLM model slots. All calls go through OpenRouter (the only LLM API provider).
+#
+# Reproducibility rule:
+#   * For dev/smoke tests, "~latest" aliases may be used.
+#   * For benchmark runs, the ModelResolver resolves each alias ONCE at run
+#     start and writes the concrete model id to
+#     results/model_snapshots/{run_id}/resolved_models.yaml. The concrete id is
+#     then used for the entire run, and both requested + resolved ids are logged.
+#
+# Model names below are placeholders aligned with the paper's Table II. They
+# are configurable and alias-resolved; unavailable models are skipped.
+models:
+  openai_frontier:
+    enabled: true
+    provider: openrouter
+    provider_family: openai
+    requested_model: "~openai/gpt-latest"
+    concrete_fallback_model: "openai/gpt-5.5-pro"
+    benchmark_tier: frontier
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: true
+      effort: high
+    use_latest_alias: true
+
+  anthropic_frontier:
+    enabled: true
+    provider: openrouter
+    provider_family: anthropic
+    requested_model: "~anthropic/claude-opus-latest"
+    concrete_fallback_model: "anthropic/claude-opus-4.7"
+    benchmark_tier: frontier
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: true
+      effort: high
+    use_latest_alias: true
+
+  google_frontier:
+    enabled: true
+    provider: openrouter
+    provider_family: google
+    requested_model: "~google/gemini-pro-latest"
+    concrete_fallback_model: "google/gemini-3.1-pro-preview"
+    benchmark_tier: frontier
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: true
+      effort: high
+    use_latest_alias: true
+
+  meta_frontier:
+    enabled: true
+    provider: openrouter
+    provider_family: meta
+    requested_model: "~meta-llama/llama-latest"
+    concrete_fallback_model: "meta-llama/llama-4-maverick"
+    benchmark_tier: open_weight
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: false
+      effort: null
+    use_latest_alias: true
+
+  deepseek_frontier:
+    enabled: true
+    provider: openrouter
+    provider_family: deepseek
+    requested_model: "~deepseek/deepseek-latest"
+    concrete_fallback_model: "deepseek/deepseek-v4-pro"
+    benchmark_tier: reasoning
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: true
+      effort: high
+    use_latest_alias: true
+
+  # Optional budget models (disabled by default).
+  google_fast:
+    enabled: false
+    provider: openrouter
+    provider_family: google
+    requested_model: "~google/gemini-flash-latest"
+    concrete_fallback_model: "google/gemini-3.5-flash"
+    benchmark_tier: fast
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: false
+      effort: null
+    use_latest_alias: true

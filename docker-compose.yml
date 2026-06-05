@@ -1,0 +1,238 @@
+# Explicit project name so Docker Desktop never merges with other Compose stacks.
+name: memory-agent-benchmark
+
+# ---------------------------------------------------------------------------
+# memory-agent-benchmark Docker Compose.
+#
+# Design:
+#   * One memory system runs at a time. Each memory system has a Compose
+#     PROFILE so only that system's runner + self-hosted backing service(s)
+#     start. Use scripts/run_one.sh (or `make run-<system>`) which stops any
+#     running memory system before starting the next.
+#   * Backing services are self-hosted and exposed ONLY on the internal
+#     network (`expose:`), never published to the host. Only `ui` publishes a
+#     host port (8501).
+#   * Secrets are never baked into images; they are passed via environment.
+# ---------------------------------------------------------------------------
+
+x-benchmark-env: &benchmark-env
+  # OpenRouter is the only LLM API provider used for model calls.
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+  OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
+  OPENROUTER_APP_TITLE: ${OPENROUTER_APP_TITLE:-memory-agent-benchmark}
+  OPENROUTER_USE_LATEST_ALIASES: ${OPENROUTER_USE_LATEST_ALIASES:-true}
+  OPENROUTER_RESOLVE_LATEST_ONCE: ${OPENROUTER_RESOLVE_LATEST_ONCE:-true}
+  OPENROUTER_STRICT_BENCHMARK_MODE: ${OPENROUTER_STRICT_BENCHMARK_MODE:-true}
+  OPENROUTER_ALLOW_FALLBACKS: ${OPENROUTER_ALLOW_FALLBACKS:-false}
+  OPENROUTER_REQUIRE_PARAMETERS: ${OPENROUTER_REQUIRE_PARAMETERS:-true}
+  OPENROUTER_DATA_COLLECTION: ${OPENROUTER_DATA_COLLECTION:-deny}
+  DEFAULT_NUM_RUNS: ${DEFAULT_NUM_RUNS:-5}
+  MODEL_PARALLELISM: ${MODEL_PARALLELISM:-1}
+  TASK_PARALLELISM: ${TASK_PARALLELISM:-1}
+  RETRIEVE_TOP_K: ${RETRIEVE_TOP_K:-3}
+  RUN_ID: ${RUN_ID:-}
+  # Self-hosted memory backend endpoints (internal network hostnames).
+  HINDSIGHT_BASE_URL: ${HINDSIGHT_BASE_URL:-http://hindsight-server:8888}
+  HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:-}
+  # LLM inside the Hindsight container (fact extraction). Defaults to OpenRouter so
+  # OPENROUTER_API_KEY in .env is enough; set HINDSIGHT_API_LLM_* to override.
+  HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-openrouter}
+  HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY:-${OPENROUTER_API_KEY}}
+  HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-openai/gpt-4o-mini}
+  ACONTEXT_BASE_URL: ${ACONTEXT_BASE_URL:-http://acontext:8000}
+  ACONTEXT_API_KEY: ${ACONTEXT_API_KEY:-}
+  MEM0_BASE_URL: ${MEM0_BASE_URL:-http://mem0-qdrant:6333}
+  MEM0_API_KEY: ${MEM0_API_KEY:-}
+  ZEP_BASE_URL: ${ZEP_BASE_URL:-http://zep:8000}
+  ZEP_API_KEY: ${ZEP_API_KEY:-}
+  SUPERMEMORY_BASE_URL: ${SUPERMEMORY_BASE_URL:-http://supermemory:8000}
+  SUPERMEMORY_API_KEY: ${SUPERMEMORY_API_KEY:-}
+
+x-benchmark-base: &benchmark-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: memory-agent-benchmark:latest
+  networks:
+    - benchnet
+  volumes:
+    - ./results:/app/results
+    - ./configs:/app/configs
+    - ./data:/app/data
+
+services:
+  # === Memory-system runner services (one profile each) ====================
+  stateless:
+    <<: *benchmark-base
+    profiles: ["stateless"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: stateless
+    command: python scripts/run_memory_system.py --memory-system stateless
+
+  hindsight:
+    <<: *benchmark-base
+    profiles: ["hindsight"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: hindsight
+    command: python scripts/run_memory_system.py --memory-system hindsight
+    depends_on:
+      hindsight-server:
+        condition: service_healthy
+
+  acontext:
+    <<: *benchmark-base
+    profiles: ["acontext"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: acontext
+    command: python scripts/run_memory_system.py --memory-system acontext
+    # No depends_on: optional acontext-backend (see profile acontext-backend).
+
+  mem0:
+    <<: *benchmark-base
+    profiles: ["mem0"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: mem0
+    command: python scripts/run_memory_system.py --memory-system mem0
+    depends_on:
+      - mem0-qdrant
+
+  zep:
+    <<: *benchmark-base
+    profiles: ["zep"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: zep
+    command: python scripts/run_memory_system.py --memory-system zep
+    depends_on:
+      - zep-backend
+
+  supermemory:
+    <<: *benchmark-base
+    profiles: ["supermemory"]
+    environment:
+      <<: *benchmark-env
+      MEMORY_SYSTEM: supermemory
+    command: python scripts/run_memory_system.py --memory-system supermemory
+    # No depends_on: optional supermemory-backend (see profile supermemory-backend).
+
+  # === Self-hosted memory backends (internal-only ports via `expose`) ======
+  # mem0 uses a self-hosted Qdrant vector store.
+  mem0-qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["mem0"]
+    networks:
+      - benchnet
+    expose:
+      - "6333"
+    volumes:
+      - mem0_qdrant_data:/qdrant/storage
+
+  # Zep Community Edition + its Postgres (self-hosted, internal only).
+  zep-postgres:
+    image: postgres:16-alpine
+    profiles: ["zep"]
+    networks:
+      - benchnet
+    environment:
+      POSTGRES_USER: zep
+      POSTGRES_PASSWORD: zep
+      POSTGRES_DB: zep
+    expose:
+      - "5432"
+    volumes:
+      - zep_pg_data:/var/lib/postgresql/data
+
+  zep-backend:
+    # Zep Community Edition. Self-hosted, internal network only.
+    image: zepai/zep:latest
+    profiles: ["zep"]
+    container_name: zep
+    networks:
+      - benchnet
+    environment:
+      ZEP_STORE_POSTGRES_DSN: postgres://zep:zep@zep-postgres:5432/zep?sslmode=disable
+    expose:
+      - "8000"
+    depends_on:
+      - zep-postgres
+
+  # Hindsight / AContext / Supermemory self-hosted services.
+  # These reference local build contexts under ./selfhosted/<system> if you
+  # vendor the upstream repos; otherwise the adapter logs "unavailable" and
+  # degrades gracefully. Replace `image`/`build` with the real upstream as
+  # needed for your environment.
+  hindsight-server:
+    # Vectorize Hindsight (API :8888, UI :9999). Same image as vectorize-io docs.
+    image: ${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:latest}
+    profiles: ["hindsight"]
+    container_name: memory-agent-hindsight
+    restart: unless-stopped
+    networks:
+      - benchnet
+    expose:
+      - "8888"
+      - "9999"
+    env_file:
+      - .env
+    environment:
+      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-openrouter}
+      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY:-${OPENROUTER_API_KEY}}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-openai/gpt-4o-mini}
+    volumes:
+      - hindsight_data:/home/hindsight/.pg0
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/v1/default/banks', timeout=5)\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  acontext-backend:
+    image: ${ACONTEXT_IMAGE:-ghcr.io/acontext/acontext:latest}
+    profiles: ["acontext-backend"]
+    container_name: acontext
+    networks:
+      - benchnet
+    expose:
+      - "8000"
+
+  supermemory-backend:
+    image: ${SUPERMEMORY_IMAGE:-ghcr.io/supermemoryai/supermemory:latest}
+    profiles: ["supermemory-backend"]
+    container_name: supermemory
+    networks:
+      - benchnet
+    expose:
+      - "8000"
+
+  # === Aggregation =========================================================
+  aggregator:
+    <<: *benchmark-base
+    profiles: ["aggregator", "tools"]
+    environment:
+      <<: *benchmark-env
+    command: python scripts/aggregate_results.py
+
+  # === UI (the only service published to the host) =========================
+  ui:
+    <<: *benchmark-base
+    profiles: ["ui"]
+    environment:
+      <<: *benchmark-env
+    command: streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
+    ports:
+      - "8501:8501"
+
+networks:
+  benchnet:
+    driver: bridge
+
+volumes:
+  mem0_qdrant_data:
+  zep_pg_data:
+  hindsight_data:

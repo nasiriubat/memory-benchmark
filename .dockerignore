@@ -1,0 +1,75 @@
+# =============================================================================
+# memory-agent-benchmark — Docker build context ignore
+#
+# Speeds up `docker compose build` by excluding secrets, local venvs, and
+# large runtime artifacts. configs/, data/, and results/ are bind-mounted at
+# runtime (see docker-compose.yml) and do not need to be baked into the image.
+# =============================================================================
+
+# --- Version control ----------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+
+# --- Secrets (injected via compose env_file / environment at runtime) ---------
+.env
+.env.*
+!.env.example
+
+# --- Python local environment & caches ----------------------------------------
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# --- Benchmark outputs (mounted volume: ./results:/app/results) -----------------
+results/
+
+# --- Tests & dev-only (not needed in production image) ------------------------
+tests/
+docs/
+
+# --- IDE / OS -----------------------------------------------------------------
+.DS_Store
+.AppleDouble
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+*.swp
+*~
+
+# --- Large local files not required at runtime --------------------------------
+*.pdf
+Memory_Matters___ICSE_TR_.pdf
+
+# --- Hugging Face / dataset caches --------------------------------------------
+.cache/
+.huggingface/
+datasets_cache/
+
+# --- Logs ---------------------------------------------------------------------
+*.log
+logs/
+
+# --- Docker meta (not needed inside image) ------------------------------------
+docker-compose.override.yml
+docker-compose.local.yml
+.dockerignore
+
+# --- Optional local compose / Makefile experiments ----------------------------
+# Makefile is tiny and harmless; keep it for reference inside the image.
