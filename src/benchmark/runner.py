@@ -23,8 +23,10 @@ from benchmark.benchmarks.dfx_adapter import DFxAdapter
 from benchmark.benchmarks.memoryarena_adapter import MemoryArenaAdapter
 from benchmark.benchmarks.state_bench_adapter import StateBenchAdapter
 from benchmark.config import AppConfig
+from benchmark.llms.base import LLMClient
+from benchmark.llms.factory import build_llm_client
 from benchmark.llms.model_resolver import ResolvedModel
-from benchmark.llms.openrouter_client import OpenRouterClient
+from benchmark.task_limits import select_labeled_tasks
 from benchmark.logging import EventLogger, get_logger
 from benchmark.memory.base import MemoryAdapter
 from benchmark.memory.namespace import make_namespace, raw_log_path
@@ -69,7 +71,7 @@ class Runner:
     def __post_init__(self) -> None:
         self.store = ResultsStore(self.results_root, self.memory_system, self.run_id)
         self.agent = SimpleToolAgent()
-        self._judge_client: OpenRouterClient | None = None
+        self._judge_client: LLMClient | None = None
 
     # ------------------------------------------------------------------ run
     def run(self) -> list[TaskResult]:
@@ -114,9 +116,74 @@ class Runner:
             if only and bench_name not in only:
                 continue
             domains = bench_spec.get(_BENCHMARK_DOMAIN_KEY.get(bench_name, "domains"), [])
-            for domain in domains:
-                out.extend(self._run_domain(bench_name, bench_spec, domain, slot, rm, client))
+            tasks_by_domain = self._tasks_by_domain_for_benchmark(
+                bench_name, bench_spec, domains
+            )
+            if tasks_by_domain is not None:
+                for domain, tasks in tasks_by_domain.items():
+                    if not tasks:
+                        continue
+                    out.extend(
+                        self._run_domain(
+                            bench_name,
+                            bench_spec,
+                            domain,
+                            slot,
+                            rm,
+                            client,
+                            tasks=tasks,
+                        )
+                    )
+            else:
+                for domain in domains:
+                    out.extend(
+                        self._run_domain(
+                            bench_name,
+                            bench_spec,
+                            domain,
+                            slot,
+                            rm,
+                            client,
+                        )
+                    )
         return out
+
+    def _tasks_by_domain_for_benchmark(
+        self,
+        bench_name: str,
+        bench_spec: dict[str, Any],
+        domains: list[str],
+    ) -> dict[str, list[BenchmarkTask]] | None:
+        """Pre-select tasks when ``max_tasks_total`` is set."""
+        max_total = self.config.run.max_tasks_total
+        if max_total <= 0 or not domains:
+            return None
+
+        adapter_cfg = dict(bench_spec)
+        adapter_cfg["retrieve_top_k"] = self.config.run.retrieve_top_k
+        adapter = _ADAPTERS[bench_name](config=adapter_cfg)
+        adapter.prepare()
+        labeled: list[tuple[str, BenchmarkTask]] = []
+        for domain in domains:
+            for task in adapter.list_tasks(domain):
+                labeled.append((domain, task))
+
+        selected = select_labeled_tasks(
+            labeled,
+            max_total=max_total,
+            strategy=self.config.run.task_sample_strategy,
+            seed=self.config.run.benchmark_task_seed,
+        )
+        counts = {domain: len(tasks) for domain, tasks in selected.items() if tasks}
+        _log.info(
+            "Benchmark '%s': max_tasks_total=%d strategy=%s seed=%d -> %s",
+            bench_name,
+            max_total,
+            self.config.run.task_sample_strategy,
+            self.config.run.benchmark_task_seed,
+            counts,
+        )
+        return selected
 
     def _run_domain(
         self,
@@ -125,7 +192,9 @@ class Runner:
         domain: str,
         slot: str,
         rm: ResolvedModel,
-        client: OpenRouterClient,
+        client: LLMClient,
+        tasks: list[BenchmarkTask] | None = None,
+        task_limit: int | None = None,
     ) -> list[TaskResult]:
         # Fresh adapter per (model, benchmark, domain) to avoid shared state.
         adapter_cfg = dict(bench_spec)
@@ -153,15 +222,20 @@ class Runner:
              "domain": domain, "resolved_model": rm.resolved_model},
         )
 
-        try:
-            tasks = adapter.list_tasks(domain)
-        except Exception as exc:  # noqa: BLE001
-            event_logger.error(f"list_tasks failed: {exc}", context={"domain": domain})
-            if self.config.run.fail_fast:
-                raise
-            return []
+        if tasks is None:
+            try:
+                tasks = adapter.list_tasks(domain)
+            except Exception as exc:  # noqa: BLE001
+                event_logger.error(f"list_tasks failed: {exc}", context={"domain": domain})
+                if self.config.run.fail_fast:
+                    raise
+                return []
+        else:
+            tasks = list(tasks)
 
-        # Optional cost guardrail: cap tasks per domain (profile or MAX_TASKS_PER_DOMAIN).
+        # Optional cost guardrails: total cap across domains, then per-domain cap.
+        if task_limit is not None and task_limit > 0:
+            tasks = tasks[:task_limit]
         max_tasks = self.config.run.max_tasks_per_domain
         if max_tasks > 0:
             tasks = tasks[:max_tasks]
@@ -215,7 +289,7 @@ class Runner:
         self,
         *,
         adapter: SequentialBenchmarkAdapter,
-        client: OpenRouterClient,
+        client: LLMClient,
         event_logger: EventLogger,
         bench_name: str,
         domain: str,
@@ -383,25 +457,12 @@ class Runner:
         return FailureCategory.MODEL_REASONING_ERROR.value
 
     # ------------------------------------------------------------- clients
-    def _build_client(self, rm: ResolvedModel) -> OpenRouterClient:
-        policy = self.config.provider_policy
-        return OpenRouterClient(
-            requested_model=rm.requested_model,
-            resolved_model=rm.resolved_model,
-            provider_family=rm.provider_family,
-            benchmark_tier=rm.benchmark_tier,
-            supported_parameters=rm.supported_parameters,
-            pricing=rm.pricing,
-            provider_policy=policy,
-            temperature=rm.temperature,
-            max_output_tokens=rm.max_output_tokens,
-            reasoning=rm.reasoning,
-            base_url=self.config.openrouter_policy.get("base_url"),
-        )
+    def _build_client(self, rm: ResolvedModel) -> LLMClient:
+        return build_llm_client(rm, self.config)
 
     def _build_judge_client(
         self, available_models: dict[str, ResolvedModel]
-    ) -> OpenRouterClient | None:
+    ) -> LLMClient | None:
         judge_slot = (
             self.config.benchmark.get("evaluators", {}).get("llm_judge_model")
         )

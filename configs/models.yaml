@@ -16,6 +16,8 @@ models:
     provider_family: openai
     requested_model: "~openai/gpt-latest"
     concrete_fallback_model: "openai/gpt-5.5-pro"
+    # Used when LLM_PROVIDER=openai (direct OpenAI API, not OpenRouter).
+    openai_model: "gpt-5.5"
     benchmark_tier: frontier
     temperature: 0
     max_output_tokens: 4096

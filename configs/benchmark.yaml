@@ -1,6 +1,6 @@
 # Top-level benchmark configuration.
 #
-# Scale presets (set BENCHMARK_PROFILE in .env): paper | full | smoke
+# Scale presets (set BENCHMARK_PROFILE in .env): paper | memoryarena_100 | full | smoke
 run:
   num_runs: 5
   retrieve_top_k: 3
@@ -9,11 +9,27 @@ run:
   fail_fast: false
   cross_task_memory: false
   max_tasks_per_domain: 0
+  max_tasks_total: 0
+  task_sample_strategy: sequential
+  benchmark_task_seed: 42
 
 profiles:
   paper:
     num_runs: 5
     max_tasks_per_domain: 50
+  # MemoryArena only: 100 tasks total (20 per config), STATE-Bench off.
+  memoryarena_100:
+    num_runs: 5
+    max_tasks_total: 100
+    task_sample_strategy: random
+    benchmark_task_seed: 42
+    benchmarks:
+      state_bench:
+        enabled: false
+      memoryarena:
+        enabled: true
+      dfx:
+        enabled: false
   full:
     num_runs: 5
     max_tasks_per_domain: 0

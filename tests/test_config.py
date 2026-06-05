@@ -36,3 +36,22 @@ def test_run_config_from_dict_without_profile():
     rc = RunConfig.from_dict({"run": {"num_runs": 3, "max_tasks_per_domain": 7}})
     assert rc.num_runs == 3
     assert rc.max_tasks_per_domain == 7
+
+
+def test_memoryarena_100_profile(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_PROFILE", "memoryarena_100")
+    monkeypatch.delenv("MAX_TASKS_TOTAL", raising=False)
+    cfg = load_config()
+    assert cfg.run.profile == "memoryarena_100"
+    assert cfg.run.max_tasks_total == 100
+    assert cfg.run.task_sample_strategy == "random"
+    assert cfg.run.benchmark_task_seed == 42
+    enabled = set(cfg.enabled_benchmarks())
+    assert enabled == {"memoryarena"}
+
+
+def test_env_overrides_max_tasks_total(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_PROFILE", "memoryarena_100")
+    monkeypatch.setenv("MAX_TASKS_TOTAL", "50")
+    cfg = load_config()
+    assert cfg.run.max_tasks_total == 50

@@ -46,16 +46,17 @@ echo ">> Stopping memory-agent-benchmark services only (project: ${COMPOSE_PROJE
 dc down --remove-orphans || true
 
 echo ">> Starting memory system: ${SYSTEM}"
-set +e
+runner_args=(--memory-system "${SYSTEM}" --run-id "${RUN_ID}")
 if [[ "$#" -gt 0 ]]; then
-  dc --profile "${SYSTEM}" run --rm "${SYSTEM}" \
-    python scripts/run_memory_system.py --memory-system "${SYSTEM}" --run-id "${RUN_ID}" "$@"
-  rc=$?
-else
-  dc --profile "${SYSTEM}" run --rm "${SYSTEM}" \
-    python scripts/run_memory_system.py --memory-system "${SYSTEM}" --run-id "${RUN_ID}"
-  rc=$?
+  runner_args+=("$@")
+elif [[ -n "${MODELS:-}" ]]; then
+  runner_args+=(--models "${MODELS}")
+  echo ">> MODELS=${MODELS}"
 fi
+set +e
+dc --profile "${SYSTEM}" run --rm "${SYSTEM}" \
+  python scripts/run_memory_system.py "${runner_args[@]}"
+rc=$?
 set -e
 
 if [[ "$rc" -eq 0 ]]; then

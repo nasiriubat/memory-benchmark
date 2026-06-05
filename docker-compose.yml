@@ -16,7 +16,12 @@ name: memory-agent-benchmark
 # ---------------------------------------------------------------------------
 
 x-benchmark-env: &benchmark-env
-  # OpenRouter is the only LLM API provider used for model calls.
+  # LLM provider: openrouter (default) | openai (direct OpenAI API).
+  LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
+  # OpenRouter (when LLM_PROVIDER=openrouter).
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
   OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
@@ -27,7 +32,14 @@ x-benchmark-env: &benchmark-env
   OPENROUTER_ALLOW_FALLBACKS: ${OPENROUTER_ALLOW_FALLBACKS:-false}
   OPENROUTER_REQUIRE_PARAMETERS: ${OPENROUTER_REQUIRE_PARAMETERS:-true}
   OPENROUTER_DATA_COLLECTION: ${OPENROUTER_DATA_COLLECTION:-deny}
+  BENCHMARK_PROFILE: ${BENCHMARK_PROFILE:-}
+  BENCHMARKS: ${BENCHMARKS:-}
   DEFAULT_NUM_RUNS: ${DEFAULT_NUM_RUNS:-5}
+  MAX_TASKS_PER_DOMAIN: ${MAX_TASKS_PER_DOMAIN:-0}
+  MAX_TASKS_TOTAL: ${MAX_TASKS_TOTAL:-0}
+  TASK_SAMPLE_STRATEGY: ${TASK_SAMPLE_STRATEGY:-sequential}
+  BENCHMARK_TASK_SEED: ${BENCHMARK_TASK_SEED:-42}
+  MODELS: ${MODELS:-}
   MODEL_PARALLELISM: ${MODEL_PARALLELISM:-1}
   TASK_PARALLELISM: ${TASK_PARALLELISM:-1}
   RETRIEVE_TOP_K: ${RETRIEVE_TOP_K:-3}
