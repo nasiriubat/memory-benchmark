@@ -55,3 +55,17 @@ def test_env_overrides_max_tasks_total(monkeypatch):
     monkeypatch.setenv("MAX_TASKS_TOTAL", "50")
     cfg = load_config()
     assert cfg.run.max_tasks_total == 50
+
+
+def test_memoryarena_reasoning_profile(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_PROFILE", "memoryarena_reasoning")
+    monkeypatch.delenv("MAX_TASKS_TOTAL", raising=False)
+    cfg = load_config()
+    assert cfg.run.profile == "memoryarena_reasoning"
+    assert cfg.run.max_tasks_total == 0
+    assert cfg.run.task_sample_strategy == "sequential"
+    enabled = set(cfg.enabled_benchmarks())
+    assert enabled == {"memoryarena"}
+    ma = cfg.benchmark["benchmarks"]["memoryarena"]
+    assert ma["configs"] == ["formal_reasoning_math", "formal_reasoning_phys"]
+    assert cfg.benchmark["benchmarks"]["state_bench"]["enabled"] is False

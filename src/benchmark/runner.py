@@ -57,6 +57,39 @@ _BENCHMARK_DOMAIN_KEY = {
     "dfx": "domains",
 }
 
+# Optional env overrides to restrict which domains/configs run per benchmark.
+_BENCHMARK_DOMAIN_ENV = {
+    "state_bench": "STATE_BENCH_DOMAINS",
+    "memoryarena": "MEMORYARENA_CONFIGS",
+    "dfx": "DFX_DOMAINS",
+}
+
+
+def _filter_domains(bench_name: str, domains: list[str]) -> list[str]:
+    """Apply optional ``*_DOMAINS`` / ``MEMORYARENA_CONFIGS`` env filter."""
+    env_key = _BENCHMARK_DOMAIN_ENV.get(bench_name)
+    if not env_key:
+        return domains
+    only = {d.strip() for d in os.environ.get(env_key, "").split(",") if d.strip()}
+    if not only:
+        return domains
+    filtered = [d for d in domains if d in only]
+    if not filtered:
+        _log.warning(
+            "Benchmark '%s': %s=%s matched no configured domains; using all.",
+            bench_name,
+            env_key,
+            sorted(only),
+        )
+        return domains
+    _log.info(
+        "Benchmark '%s': restricted to domains %s via %s.",
+        bench_name,
+        filtered,
+        env_key,
+    )
+    return filtered
+
 
 @dataclass
 class Runner:
@@ -115,7 +148,10 @@ class Runner:
                 continue
             if only and bench_name not in only:
                 continue
-            domains = bench_spec.get(_BENCHMARK_DOMAIN_KEY.get(bench_name, "domains"), [])
+            domains = _filter_domains(
+                bench_name,
+                bench_spec.get(_BENCHMARK_DOMAIN_KEY.get(bench_name, "domains"), []),
+            )
             tasks_by_domain = self._tasks_by_domain_for_benchmark(
                 bench_name, bench_spec, domains
             )

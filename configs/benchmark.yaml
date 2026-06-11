@@ -30,6 +30,22 @@ profiles:
         enabled: true
       dfx:
         enabled: false
+  # MemoryArena formal reasoning only (math + physics, all 60 tasks), STATE-Bench off.
+  memoryarena_reasoning:
+    num_runs: 5
+    max_tasks_total: 0
+    task_sample_strategy: sequential
+    benchmark_task_seed: 42
+    benchmarks:
+      state_bench:
+        enabled: false
+      memoryarena:
+        enabled: true
+        configs:
+          - formal_reasoning_math
+          - formal_reasoning_phys
+      dfx:
+        enabled: false
   full:
     num_runs: 5
     max_tasks_per_domain: 0
