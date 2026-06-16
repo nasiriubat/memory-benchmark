@@ -1,1 +1,1 @@
-"""LLM clients. OpenRouter is the only live provider; others are deprecated shims."""
+"""LLM clients. Provider selected via LLM_PROVIDER (openrouter | openai)."""

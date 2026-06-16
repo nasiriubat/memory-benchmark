@@ -16,7 +16,7 @@ from __future__ import annotations
 import typer
 
 from benchmark.config import AppConfig, load_config
-from benchmark.llms.model_resolver import ModelResolver
+from benchmark.llms.factory import build_model_resolver, llm_provider
 from benchmark.logging import get_logger
 from benchmark.progress import set_done, set_failed, set_running
 from benchmark.runner import Runner, build_memory_adapter
@@ -53,14 +53,9 @@ def run_memory_system(
             }
         }
 
-    # 1. Resolve models ONCE (snapshot catalog + resolved mapping).
-    policy = cfg.openrouter_policy
-    resolver = ModelResolver(
-        results_root=root,
-        base_url=policy.get("base_url"),
-        provider_policy=cfg.provider_policy,
-        fail_if_model_unavailable=bool(policy.get("fail_if_model_unavailable", False)),
-    )
+    # 1. Resolve models ONCE (OpenRouter catalog or direct OpenAI ids).
+    _log.info("LLM provider: %s", llm_provider())
+    resolver = build_model_resolver(results_root=root, config=cfg)
     resolution = resolver.resolve_all(run_id, cfg.models)
     resolved_models = resolution["resolved"]
 

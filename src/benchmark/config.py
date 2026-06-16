@@ -62,6 +62,9 @@ class RunConfig:
     fail_fast: bool = False
     cross_task_memory: bool = False
     max_tasks_per_domain: int = 0
+    max_tasks_total: int = 0
+    task_sample_strategy: str = "sequential"
+    benchmark_task_seed: int = 42
     profile: str = ""
 
     @classmethod
@@ -77,6 +80,24 @@ class RunConfig:
                 run.get("max_tasks_per_domain", 0),
             )
         )
+        max_tasks_total = int(
+            os.environ.get(
+                "MAX_TASKS_TOTAL",
+                run.get("max_tasks_total", 0),
+            )
+        )
+        task_sample_strategy = str(
+            os.environ.get(
+                "TASK_SAMPLE_STRATEGY",
+                run.get("task_sample_strategy", "sequential"),
+            )
+        ).strip().lower() or "sequential"
+        benchmark_task_seed = int(
+            os.environ.get(
+                "BENCHMARK_TASK_SEED",
+                run.get("benchmark_task_seed", 42),
+            )
+        )
         return cls(
             num_runs=int(os.environ.get("DEFAULT_NUM_RUNS", run.get("num_runs", 5))),
             retrieve_top_k=int(os.environ.get("RETRIEVE_TOP_K", run.get("retrieve_top_k", 3))),
@@ -89,6 +110,9 @@ class RunConfig:
             fail_fast=bool(run.get("fail_fast", False)),
             cross_task_memory=bool(run.get("cross_task_memory", False)),
             max_tasks_per_domain=max_tasks,
+            max_tasks_total=max_tasks_total,
+            task_sample_strategy=task_sample_strategy,
+            benchmark_task_seed=benchmark_task_seed,
             profile=profile_name,
         )
 
