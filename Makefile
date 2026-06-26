@@ -16,9 +16,11 @@ init-run:
 paper-init:
 	bash scripts/init_paper_run.sh
 
-# Build the shared benchmark image.
+# Build the shared benchmark image. All runner/ui/aggregator services use the
+# same image:tag, so build it ONCE — building 3 identical services in parallel
+# races to export the same tag and can trip a BuildKit snapshot error.
 build:
-	COMPOSE_PROJECT_NAME=memory-agent-benchmark docker compose -p memory-agent-benchmark build stateless ui aggregator
+	COMPOSE_PROJECT_NAME=memory-agent-benchmark docker compose -p memory-agent-benchmark build stateless
 
 # Run EVERY memory system one after another, then aggregate.
 # Default models: top OpenAI, Meta, Claude, Gemini. Override with MODELS=...
@@ -58,8 +60,10 @@ aggregate:
 	COMPOSE_PROJECT_NAME=memory-agent-benchmark docker compose -p memory-agent-benchmark run --rm aggregator
 
 # Launch the dashboard on http://localhost:8501 (detached, isolated project).
+# Uses the image built by `make build` (no --build: rebuilding the shared image
+# from a second service can trip a BuildKit snapshot error).
 ui:
-	COMPOSE_PROJECT_NAME=memory-agent-benchmark docker compose -p memory-agent-benchmark up --build -d ui
+	COMPOSE_PROJECT_NAME=memory-agent-benchmark docker compose -p memory-agent-benchmark up -d ui
 
 # Full Docker benchmark (one system at a time) + dashboard.
 bench: ui
