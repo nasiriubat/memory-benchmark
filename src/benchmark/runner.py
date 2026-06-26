@@ -297,6 +297,13 @@ class Runner:
         # Fresh adapter per (model, benchmark, domain) to avoid shared state.
         adapter_cfg = dict(bench_spec)
         adapter_cfg["retrieve_top_k"] = self.config.run.retrieve_top_k
+        evaluators = self.config.benchmark.get("evaluators", {}) or {}
+        adapter_cfg["answer_correctness_scorer"] = evaluators.get(
+            "answer_correctness_scorer", "token_f1"
+        )
+        adapter_cfg["answer_correctness_rubric"] = evaluators.get(
+            "answer_correctness_rubric", ""
+        )
         adapter = _ADAPTERS[bench_name](config=adapter_cfg)
         adapter.prepare()
 

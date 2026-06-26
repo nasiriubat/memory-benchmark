@@ -231,6 +231,12 @@ def main() -> None:
                  view.get("memory_utility_gain_vs_stateless", pd.Series(dtype=float)))
     _metric_card(c6, "Cost / task", view["estimated_cost_usd"], fmt="${:.6f}")
     _metric_card(c7, "Latency (ms)", view["latency_ms"], fmt="{:.0f}")
+    st.caption(
+        "Memory utility gain is derived at aggregation (this row's score − the matched stateless "
+        "row's score). It is **null in the per-system `results.jsonl` by design** and is filled in "
+        "only after the `stateless` baseline has run on the same tasks and `make aggregate` has run; "
+        "in-progress / per-system-only runs show it empty."
+    )
 
     # ---- Leaderboard ----
     st.subheader("Leaderboard")

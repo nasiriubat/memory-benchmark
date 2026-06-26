@@ -123,6 +123,19 @@ evaluators:
   llm_judge_model: judge
   # Prefer official benchmark scores, then deterministic checks, then judge.
   rule_compliance_order: ["official", "deterministic", "llm_judge"]
+  # How a subtask answer is graded for correctness (success/score/progress):
+  #   token_f1  = deterministic token overlap (fails on MemoryArena's ASIN/dict
+  #               answers — the agent cannot output internal ids).
+  #   llm_judge = grade answer-vs-expected semantically with the cheap judge slot.
+  answer_correctness_scorer: llm_judge
+  answer_correctness_rubric: >
+    You are grading a memory-agent benchmark answer. The EXPECTED answer encodes
+    the correct choice, sometimes via internal identifiers (e.g. target_asin) or
+    structured formatting that the agent cannot know or reproduce. Grade by the
+    described item / attributes / values, NOT by exact ids or formatting. Score
+    1.0 if the agent's answer clearly identifies the same item or decision as the
+    expected answer, partial (0.3-0.7) if partially correct, and 0.0 if wrong,
+    irrelevant, or missing.
 
 # Statistical analysis (paper Section III-J).
 statistics:
