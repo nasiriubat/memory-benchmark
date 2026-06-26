@@ -24,6 +24,11 @@ class MemoryAdapter(abc.ABC):
     available: bool = True
     #: Reason captured when ``available`` is False.
     unavailable_reason: str | None = None
+    #: True when memory operations are (or have been) served by the local
+    #: namespace-isolated fallback store rather than the real backend SDK. This
+    #: is recorded on every result so a run that silently degraded to the local
+    #: store is never mistaken for a measurement of the real memory system.
+    uses_local_fallback: bool = False
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}

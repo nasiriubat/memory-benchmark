@@ -42,7 +42,7 @@ x-benchmark-env: &benchmark-env
   BENCHMARK_TASK_SEED: ${BENCHMARK_TASK_SEED:-42}
   MODELS: ${MODELS:-}
   MODEL_PARALLELISM: ${MODEL_PARALLELISM:-1}
-  TASK_PARALLELISM: ${TASK_PARALLELISM:-1}
+  TASK_PARALLELISM: ${TASK_PARALLELISM:-4}
   RETRIEVE_TOP_K: ${RETRIEVE_TOP_K:-3}
   RUN_ID: ${RUN_ID:-}
   # Self-hosted memory backend endpoints (internal network hostnames).
@@ -52,11 +52,17 @@ x-benchmark-env: &benchmark-env
   # OPENROUTER_API_KEY in .env is enough; set HINDSIGHT_API_LLM_* to override.
   HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-openrouter}
   HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY:-${OPENROUTER_API_KEY}}
-  HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-openai/gpt-4o-mini}
-  ACONTEXT_BASE_URL: ${ACONTEXT_BASE_URL:-http://acontext:8000}
+  HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-gpt-4o-mini}
+  # AContext runs as its own stack (via `acontext server up`); the benchmark
+  # connects to its API (port 8029, path /api/v1). From inside the container the
+  # host is reached via host.docker.internal (see the acontext service below).
+  ACONTEXT_BASE_URL: ${ACONTEXT_BASE_URL:-http://host.docker.internal:8029/api/v1}
   ACONTEXT_API_KEY: ${ACONTEXT_API_KEY:-}
   MEM0_BASE_URL: ${MEM0_BASE_URL:-http://mem0-qdrant:6333}
   MEM0_API_KEY: ${MEM0_API_KEY:-}
+  # Cheap model mem0 uses internally for fact extraction (defaults to OPENAI_MODEL
+  # in the adapter if unset). Kept consistent with the other memory systems.
+  MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-gpt-4o-mini}
   ZEP_BASE_URL: ${ZEP_BASE_URL:-http://zep:8000}
   ZEP_API_KEY: ${ZEP_API_KEY:-}
   SUPERMEMORY_BASE_URL: ${SUPERMEMORY_BASE_URL:-http://supermemory:8000}
@@ -102,7 +108,11 @@ services:
       <<: *benchmark-env
       MEMORY_SYSTEM: acontext
     command: python scripts/run_memory_system.py --memory-system acontext
-    # No depends_on: optional acontext-backend (see profile acontext-backend).
+    # AContext is NOT managed by this compose (it has its own 6-service stack
+    # brought up by `acontext server up`). We reach its host-published API at
+    # :8029 via host.docker.internal. Bring AContext up first (see RUNBOOK).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   mem0:
     <<: *benchmark-base
@@ -112,7 +122,8 @@ services:
       MEMORY_SYSTEM: mem0
     command: python scripts/run_memory_system.py --memory-system mem0
     depends_on:
-      - mem0-qdrant
+      mem0-qdrant:
+        condition: service_healthy
 
   zep:
     <<: *benchmark-base
@@ -131,7 +142,8 @@ services:
       <<: *benchmark-env
       MEMORY_SYSTEM: supermemory
     command: python scripts/run_memory_system.py --memory-system supermemory
-    # No depends_on: optional supermemory-backend (see profile supermemory-backend).
+    depends_on:
+      - supermemory-backend
 
   # === Self-hosted memory backends (internal-only ports via `expose`) ======
   # mem0 uses a self-hosted Qdrant vector store.
@@ -144,6 +156,13 @@ services:
       - "6333"
     volumes:
       - mem0_qdrant_data:/qdrant/storage
+    # Qdrant image ships bash but no curl/wget/nc, so probe the port via /dev/tcp.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   # Zep Community Edition + its Postgres (self-hosted, internal only).
   zep-postgres:
@@ -162,13 +181,20 @@ services:
 
   zep-backend:
     # Zep Community Edition. Self-hosted, internal network only.
-    image: zepai/zep:latest
+    # Correct CE image is ghcr.io/getzep/zep (the old zepai/zep ref did not pull).
+    image: ${ZEP_IMAGE:-ghcr.io/getzep/zep:latest}
     profiles: ["zep"]
     container_name: zep
     networks:
       - benchnet
     environment:
       ZEP_STORE_POSTGRES_DSN: postgres://zep:zep@zep-postgres:5432/zep?sslmode=disable
+      # Zep CE runs its own LLM extraction. Exact env keys vary by Zep image
+      # version; these cover the common graphiti-based CE config. Adjust to match
+      # your image. Uses the same OpenAI key as the benchmark by default.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ZEP_LLM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_NAME: ${ZEP_LLM_MODEL:-gpt-4o-mini}
     expose:
       - "8000"
     depends_on:
@@ -195,7 +221,7 @@ services:
     environment:
       HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-openrouter}
       HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY:-${OPENROUTER_API_KEY}}
-      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-openai/gpt-4o-mini}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-gpt-4o-mini}
     volumes:
       - hindsight_data:/home/hindsight/.pg0
     healthcheck:
@@ -205,18 +231,22 @@ services:
       retries: 20
       start_period: 300s
 
-  acontext-backend:
-    image: ${ACONTEXT_IMAGE:-ghcr.io/acontext/acontext:latest}
-    profiles: ["acontext-backend"]
-    container_name: acontext
-    networks:
-      - benchnet
-    expose:
-      - "8000"
+  # NOTE: AContext (memodb-io/Acontext) is a 6-service stack (api:8029, core,
+  # postgres/pgvector, redis, rabbitmq, seaweedfs), NOT a single image. It runs
+  # independently from a self-contained compose in ./acontext_server/ (gitignored)
+  # with SANDBOX_TYPE=disabled; the `acontext` runner above connects to it via
+  # host.docker.internal:8029. Bring it up with:
+  #   cd acontext_server && docker compose --env-file .env up -d
+  # The default-project SDK key is sk-ac-<ROOT_API_BEARER_TOKEN> (already set as
+  # ACONTEXT_API_KEY in .env). See RUNBOOK "AContext setup".
 
   supermemory-backend:
     image: ${SUPERMEMORY_IMAGE:-ghcr.io/supermemoryai/supermemory:latest}
-    profiles: ["supermemory-backend"]
+    # Starts together with the `supermemory` runner (was a separate profile that
+    # never came up with the runner). NOTE: the default image ref above is a
+    # placeholder and is NOT publicly pullable — set SUPERMEMORY_IMAGE to a real
+    # image (or a local build context) before running this profile.
+    profiles: ["supermemory"]
     container_name: supermemory
     networks:
       - benchnet

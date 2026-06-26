@@ -52,6 +52,26 @@ class ResolvedModel:
     max_output_tokens: int = 4096
     reasoning: dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ResolvedModel":
+        """Rebuild a ResolvedModel from a saved resolved_models.yaml entry."""
+        return cls(
+            slot=data["slot"],
+            provider_family=data.get("provider_family", "unknown"),
+            benchmark_tier=data.get("benchmark_tier"),
+            requested_model=data.get("requested_model", ""),
+            resolved_model=data.get("resolved_model", ""),
+            available=bool(data.get("available", False)),
+            unavailable_reason=data.get("unavailable_reason"),
+            context_length=data.get("context_length"),
+            supported_parameters=list(data.get("supported_parameters", []) or []),
+            pricing=data.get("pricing", {}) or {},
+            catalog_created_at=data.get("catalog_created_at"),
+            temperature=float(data.get("temperature", 0.0)),
+            max_output_tokens=int(data.get("max_output_tokens", 4096)),
+            reasoning=data.get("reasoning", {}) or {},
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "slot": self.slot,

@@ -94,3 +94,4 @@ docker-compose.local.yml
 
 # --- Optional: large local reference files (uncomment if needed) --------------
 # *.pdf
+acontext_server/

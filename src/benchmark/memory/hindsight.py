@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 import time
 from typing import Any
 
@@ -38,6 +39,10 @@ class HindsightAdapter(MemoryAdapter):
         super().__init__(config)
         self._fallback = LocalMemoryStore()
         self._client: Any = None
+        # The hindsight sync client binds an aiohttp session to the event loop
+        # of the thread that creates it. Under task_parallelism > 1 the adapter
+        # is called from worker threads, so each thread gets its own client.
+        self._tls = threading.local()
         self.base_url = (
             os.environ.get(self.base_url_env, "")
             or (config or {}).get("base_url", "")
@@ -46,6 +51,7 @@ class HindsightAdapter(MemoryAdapter):
         self._api_key = os.environ.get(self.api_key_env, "")
         self.available, self.unavailable_reason = self._connect()
         if not self.available:
+            self.uses_local_fallback = True
             self.log.warning(
                 "hindsight unavailable (%s). Using local namespace-isolated fallback.",
                 self.unavailable_reason,
@@ -68,6 +74,7 @@ class HindsightAdapter(MemoryAdapter):
             # Probe API (banks is a BanksAPI object, not callable).
             client.banks.list()
             self._client = client
+            self._tls.client = client  # reuse the probe client on this thread
             return True, None
         except Exception as exc:  # noqa: BLE001
             if client is not None and hasattr(client, "close"):
@@ -77,29 +84,64 @@ class HindsightAdapter(MemoryAdapter):
                     pass
             return False, str(exc)
 
-    def _ensure_bank(self, namespace: MemoryNamespace) -> str:
-        bid = _bank_id(namespace)
-        assert self._client is not None
+    def _client_for_thread(self) -> Any:
+        """Return a HindsightClient bound to the *current* thread's event loop.
+
+        The hindsight sync wrapper drives async calls through a per-thread event
+        loop (hindsight_client._run_async), and an aiohttp session is bound to
+        the loop that created it. With task_parallelism > 1 the adapter runs in
+        ThreadPoolExecutor worker threads, so each thread needs its own client —
+        otherwise every call raises "Timeout context manager should be used
+        inside a task" and silently falls back to the local store. Cached per
+        thread; created lazily.
+        """
+        if not self.available:
+            return None
+        client = getattr(self._tls, "client", None)
+        if client is not None:
+            return client
         try:
-            self._client.create_bank(bid, name=bid)
+            from hindsight import HindsightClient
+
+            client = HindsightClient(
+                base_url=self.base_url,
+                api_key=self._api_key or None,
+                timeout=120.0,
+            )
+            # Bind this client's aiohttp session to the current thread's loop.
+            client.banks.list()
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning(
+                "hindsight per-thread client init failed (%s); fallback store", exc
+            )
+            return None
+        self._tls.client = client
+        return client
+
+    def _ensure_bank(self, client: Any, namespace: MemoryNamespace) -> str:
+        bid = _bank_id(namespace)
+        try:
+            client.create_bank(bid, name=bid)
         except Exception:  # noqa: BLE001
             # Bank likely already exists for this namespace.
             pass
         return bid
 
     def setup(self, namespace: MemoryNamespace) -> None:
-        if self.available and self._client:
-            self._ensure_bank(namespace)
+        client = self._client_for_thread()
+        if client is not None:
+            self._ensure_bank(client, namespace)
 
     def reset(self, namespace: MemoryNamespace) -> None:
-        if self.available and self._client:
+        client = self._client_for_thread()
+        if client is not None:
             bid = _bank_id(namespace)
             try:
-                self._client.delete_bank(bid)
+                client.delete_bank(bid)
             except Exception:  # noqa: BLE001
                 pass
             try:
-                self._client.create_bank(bid, name=bid)
+                client.create_bank(bid, name=bid)
             except Exception as exc:  # noqa: BLE001
                 self.log.warning("hindsight reset failed for %s: %s", bid, exc)
         self._fallback.reset(namespace)
@@ -108,13 +150,16 @@ class HindsightAdapter(MemoryAdapter):
         self, query: str, top_k: int, metadata: dict[str, Any]
     ) -> list[MemoryRecord]:
         ns = self._require_namespace(metadata)
-        if not self.available or not self._client:
+        client = self._client_for_thread()
+        if client is None:
             return self._fallback.retrieve(query, top_k, ns)
 
         bid = _bank_id(ns)
-        t0 = time.perf_counter()
+        # Note: end-to-end retrieval latency is measured by the runner around
+        # this call (see SequentialBenchmarkAdapter._run_subtask) and recorded
+        # as memory_retrieval_latency_ms; no separate timer is needed here.
         try:
-            response = self._client.recall(bid, query, max_tokens=4096)
+            response = client.recall(bid, query, max_tokens=4096)
             records: list[MemoryRecord] = []
             for i, item in enumerate((response.results or [])[:top_k]):
                 text = getattr(item, "text", None) or str(item)
@@ -130,20 +175,20 @@ class HindsightAdapter(MemoryAdapter):
                 )
             return records
         except Exception as exc:  # noqa: BLE001
+            self.uses_local_fallback = True
             self.log.warning("hindsight recall failed (%s); fallback store", exc)
             return self._fallback.retrieve(query, top_k, ns)
-        finally:
-            _ = (time.perf_counter() - t0) * 1000
 
     def write(self, record: MemoryRecord, metadata: dict[str, Any]) -> MemoryWriteResult:
         ns = self._require_namespace(metadata)
-        if not self.available or not self._client:
+        client = self._client_for_thread()
+        if client is None:
             return self._fallback.write(record, ns)
 
-        bid = self._ensure_bank(ns)
+        bid = self._ensure_bank(client, ns)
         t0 = time.perf_counter()
         try:
-            self._client.retain(bid, record.text)
+            client.retain(bid, record.text)
             latency = (time.perf_counter() - t0) * 1000
             return MemoryWriteResult(
                 success=True,
@@ -151,6 +196,7 @@ class HindsightAdapter(MemoryAdapter):
                 latency_ms=latency,
             )
         except Exception as exc:  # noqa: BLE001
+            self.uses_local_fallback = True
             self.log.warning("hindsight retain failed (%s); fallback store", exc)
             return self._fallback.write(record, ns)
 
@@ -162,10 +208,11 @@ class HindsightAdapter(MemoryAdapter):
         return self.write(record, metadata)
 
     def store_size_bytes(self, namespace: MemoryNamespace) -> int:
-        if self.available and self._client:
+        client = self._client_for_thread()
+        if client is not None:
             try:
                 bid = _bank_id(namespace)
-                mems = self._client.memories.list(bid, limit=1000)
+                mems = client.memories.list(bid, limit=1000)
                 total = 0
                 for m in mems or []:
                     total += len(getattr(m, "text", "") or "")

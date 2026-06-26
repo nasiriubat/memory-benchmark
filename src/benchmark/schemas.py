@@ -171,6 +171,13 @@ class TaskRunResult(BaseModel):
     latency_ms: float = 0.0
     estimated_cost_usd: float = 0.0
 
+    # LLM-judge usage (relevance/usage/consistency scoring). Tracked separately so
+    # the agent metrics above stay clean and total cost is not understated.
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
+    judge_reasoning_tokens: int = 0
+    judge_cost_usd: float = 0.0
+
     retrieved_memory_count: int = 0
     written_memory_count: int = 0
     memory_store_size_bytes: int = 0
@@ -253,6 +260,13 @@ class TaskResult(BaseModel):
     cached_input_tokens: int = 0
     total_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    # LLM-judge usage (separate from the agent cost above).
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
+    judge_reasoning_tokens: int = 0
+    judge_cost_usd: float = 0.0
+    # Agent + judge combined (the true total spend for this task row).
+    total_cost_usd: float = 0.0
 
     # Memory behavior.
     retrieved_memory_count: int = 0
@@ -264,6 +278,12 @@ class TaskResult(BaseModel):
     memory_correctness_score: float | None = None
     memory_usage_score: float | None = None
     memory_utility_gain_vs_stateless: float | None = None
+    # Backend provenance: whether the real memory backend was available this run,
+    # and whether operations were actually served by the local fallback store.
+    # ``memory_uses_local_fallback=True`` means this row does NOT measure the
+    # real memory system and should be excluded/annotated in cross-system analysis.
+    memory_backend_available: bool = True
+    memory_uses_local_fallback: bool = False
 
     # Failure analysis.
     failure_category: str | None = None
@@ -326,4 +346,9 @@ class RunMetadata(BaseModel):
     resolved_models_path: str | None = None
     model_resolution_time: str | None = None
     openrouter_base_url: str | None = None
+    # Memory backend provenance captured at run start (runtime fallbacks are
+    # additionally recorded per-row on TaskResult.memory_uses_local_fallback).
+    memory_backend_available: bool = True
+    memory_uses_local_fallback: bool = False
+    memory_unavailable_reason: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)

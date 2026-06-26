@@ -29,9 +29,13 @@ dependencies = [
 
 [project.optional-dependencies]
 # Real memory-system SDKs. Adapters degrade gracefully when these are missing.
+# (acontext has no PyPI SDK; its adapter talks to the backend over httpx, which
+# is already a base dependency.)
 memory = [
     "mem0ai>=0.1.0",
+    "qdrant-client>=1.9",
     "zep-python>=2.0",
+    "acontext>=0.1.0",
 ]
 memory-hindsight = [
     "hindsight-all>=0.6",

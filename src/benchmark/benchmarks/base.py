@@ -28,12 +28,44 @@ from benchmark.memory.base import MemoryAdapter
 from benchmark.metrics import progress_score
 from benchmark.schemas import (
     BenchmarkTask,
+    LLMResponse,
     MemoryNamespace,
     MemoryRecord,
     SubtaskRun,
     TaskRunResult,
     TaskScore,
 )
+
+
+class _JudgeUsageTracker(LLMClient):
+    """Wraps the judge LLM client to tally token usage + cost across all judge
+    calls for one task. A fresh tracker is created per task in ``score_task``
+    (which runs in that task's own thread), so accumulation needs no lock.
+    The evaluator functions call ``model.generate`` unchanged.
+    """
+
+    def __init__(self, inner: LLMClient) -> None:
+        self._inner = inner
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.reasoning_tokens = 0
+        self.cost_usd = 0.0
+        self.provider_family = inner.provider_family
+        self.requested_model = inner.requested_model
+        self.resolved_model = inner.resolved_model
+
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        resp = self._inner.generate(messages, tools=tools, metadata=metadata)
+        self.input_tokens += resp.input_tokens
+        self.output_tokens += resp.output_tokens
+        self.reasoning_tokens += resp.reasoning_tokens
+        self.cost_usd += resp.estimated_cost_usd
+        return resp
 
 
 class BenchmarkAdapter(abc.ABC):
@@ -304,6 +336,11 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
         success = total > 0 and correct == total
         mean_score = sum(s.score for s in subs) / total if total else 0.0
 
+        # Wrap the judge client so all judge LLM calls below have their token
+        # usage + cost tallied into this task's judge_* fields (None when there is
+        # no judge model, e.g. offline runs).
+        judge = _JudgeUsageTracker(self.judge_model) if self.judge_model is not None else None
+
         # Memory utility signals (aggregate over subtasks that retrieved memory).
         relevance_vals: list[float] = []
         correctness_vals: list[float] = []
@@ -321,7 +358,7 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
                         query=s.output or "",
                         retrieved=retrieved,
                         gold_memory_facts=signals.get("gold_memory_facts"),
-                        model=self.judge_model,
+                        model=judge,
                     )
                 )
                 correctness_vals.append(
@@ -332,7 +369,7 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
                         final_answer=s.output or "",
                         used_memory_ids=s.used_memory_ids,
                         retrieved=retrieved,
-                        model=self.judge_model,
+                        model=judge,
                     )
                 )
             if ledger is not None:
@@ -340,11 +377,18 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
                     score_consistency(
                         output=s.output or "",
                         ledger=ledger,
-                        model=self.judge_model,
+                        model=judge,
                     )
                 )
             result.memory_retrieval_latency_ms += signals.get("retrieval_latency_ms", 0.0)
             result.memory_write_latency_ms += signals.get("write_latency_ms", 0.0)
+
+        # Record the judge's cumulative usage/cost for this task.
+        if judge is not None:
+            result.judge_input_tokens += judge.input_tokens
+            result.judge_output_tokens += judge.output_tokens
+            result.judge_reasoning_tokens += judge.reasoning_tokens
+            result.judge_cost_usd += judge.cost_usd
 
         def _avg(xs: list[float]) -> float | None:
             return sum(xs) / len(xs) if xs else None

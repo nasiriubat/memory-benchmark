@@ -45,6 +45,12 @@ echo ">> RUN_ID=${RUN_ID}"
 echo ">> Stopping memory-agent-benchmark services only (project: ${COMPOSE_PROJECT_NAME})..."
 dc down --remove-orphans || true
 
+# AContext runs as its own separate compose stack (not in this project). Bring it
+# up automatically so `make acontext` needs no manual steps. No-op if already up.
+if [[ "${SYSTEM}" == "acontext" ]]; then
+  bash scripts/setup_acontext_server.sh
+fi
+
 echo ">> Starting memory system: ${SYSTEM}"
 runner_args=(--memory-system "${SYSTEM}" --run-id "${RUN_ID}")
 if [[ "$#" -gt 0 ]]; then

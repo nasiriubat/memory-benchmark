@@ -23,7 +23,29 @@ models:
     max_output_tokens: 8192
     reasoning:
       enabled: true
-      effort: high
+      # medium effort balances quality vs. reasoning-token cost (reasoning is the
+      # ~80%-of-output, $30/1M tier). Now actually applied on the OpenAI path.
+      effort: medium
+    use_latest_alias: true
+
+  # Cheap LLM-judge slot. Used ONLY for memory relevance/usage/consistency
+  # scoring (see evaluators.llm_judge_model in benchmark.yaml), NEVER as a
+  # system-under-test: the runner skips any slot whose benchmark_tier == "judge".
+  # Dual-provider so it works under LLM_PROVIDER=openai now and =openrouter later.
+  # TODO(user): confirm the exact cheap model id + add its pricing to pricing.yaml.
+  judge:
+    enabled: true
+    provider: openrouter
+    provider_family: openai
+    requested_model: "~openai/gpt-4o-mini"     # used when LLM_PROVIDER=openrouter
+    concrete_fallback_model: "openai/gpt-4o-mini"
+    openai_model: "gpt-4o-mini"                # used when LLM_PROVIDER=openai (gpt-5.5-mini does not exist)
+    benchmark_tier: judge
+    temperature: 0
+    max_output_tokens: 2048
+    reasoning:
+      enabled: false
+      effort: null
     use_latest_alias: true
 
   anthropic_frontier:

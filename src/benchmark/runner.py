@@ -116,7 +116,17 @@ class Runner:
             _log.warning("No available models resolved; nothing to run.")
             return results
 
+        # The judge client may use any available slot (including the dedicated
+        # judge slot), but judge-tier slots are NEVER run as systems-under-test.
         self._judge_client = self._build_judge_client(available_models)
+        run_models = {
+            slot: rm
+            for slot, rm in available_models.items()
+            if rm.benchmark_tier != "judge"
+        }
+        if not run_models:
+            _log.warning("No system-under-test models resolved (only judge); nothing to run.")
+            return results
 
         model_par = max(1, self.config.run.model_parallelism)
 
@@ -124,17 +134,69 @@ class Runner:
             slot, rm = item
             return self._run_for_model(slot, rm)
 
-        if model_par > 1 and len(available_models) > 1:
+        if model_par > 1 and len(run_models) > 1:
             with ThreadPoolExecutor(max_workers=model_par) as pool:
-                for partial in pool.map(run_model, available_models.items()):
+                for partial in pool.map(run_model, run_models.items()):
                     results.extend(partial)
         else:
-            for item in available_models.items():
+            for item in run_models.items():
                 results.extend(run_model(item))
 
         self.store.flush_tabular()
         self._print_summary(results)
         return results
+
+    # --------------------------------------------------------------- plan
+    def plan(self) -> dict[str, Any]:
+        """Read-only enumeration of the job grid — makes no LLM calls.
+
+        Returns per-benchmark task/subtask counts and the total number of agent
+        LLM calls (= subtasks across the selected grid x num_runs). The grid is
+        identical for every model, so callers multiply by per-model pricing.
+        """
+        only = {b.strip() for b in os.environ.get("BENCHMARKS", "").split(",") if b.strip()}
+        benchmarks: dict[str, dict[str, int]] = {}
+        total_tasks = 0
+        total_subtasks = 0
+        for bench_name, bench_spec in self.config.enabled_benchmarks().items():
+            if bench_name not in _ADAPTERS or (only and bench_name not in only):
+                continue
+            domains = _filter_domains(
+                bench_name,
+                bench_spec.get(_BENCHMARK_DOMAIN_KEY.get(bench_name, "domains"), []),
+            )
+            tasks_by_domain = self._tasks_by_domain_for_benchmark(bench_name, bench_spec, domains)
+            if tasks_by_domain is None:
+                adapter_cfg = dict(bench_spec)
+                adapter_cfg["retrieve_top_k"] = self.config.run.retrieve_top_k
+                adapter = _ADAPTERS[bench_name](config=adapter_cfg)
+                adapter.prepare()
+                tasks_by_domain = {}
+                for domain in domains:
+                    tasks = adapter.list_tasks(domain)
+                    if self.config.run.max_tasks_per_domain > 0:
+                        tasks = tasks[: self.config.run.max_tasks_per_domain]
+                    tasks_by_domain[domain] = tasks
+            elif self.config.run.max_tasks_per_domain > 0:
+                tasks_by_domain = {
+                    d: ts[: self.config.run.max_tasks_per_domain]
+                    for d, ts in tasks_by_domain.items()
+                }
+            n_tasks = sum(len(ts) for ts in tasks_by_domain.values())
+            n_sub = sum(len(t.subtasks) for ts in tasks_by_domain.values() for t in ts)
+            benchmarks[bench_name] = {"domains": len(domains), "tasks": n_tasks, "subtasks": n_sub}
+            total_tasks += n_tasks
+            total_subtasks += n_sub
+        num_runs = self.config.run.num_runs
+        return {
+            "memory_system": self.memory_system,
+            "profile": self.config.run.profile,
+            "num_runs": num_runs,
+            "benchmarks": benchmarks,
+            "total_tasks": total_tasks,
+            "total_subtasks": total_subtasks,
+            "agent_calls": total_subtasks * num_runs,
+        }
 
     # ---------------------------------------------------------- per-model
     def _run_for_model(self, slot: str, rm: ResolvedModel) -> list[TaskResult]:
@@ -427,6 +489,11 @@ class Runner:
             cached_input_tokens=run_result.cached_input_tokens,
             total_tokens=run_result.input_tokens + run_result.output_tokens,
             estimated_cost_usd=run_result.estimated_cost_usd,
+            judge_input_tokens=run_result.judge_input_tokens,
+            judge_output_tokens=run_result.judge_output_tokens,
+            judge_reasoning_tokens=run_result.judge_reasoning_tokens,
+            judge_cost_usd=run_result.judge_cost_usd,
+            total_cost_usd=run_result.estimated_cost_usd + run_result.judge_cost_usd,
             retrieved_memory_count=run_result.retrieved_memory_count,
             written_memory_count=run_result.written_memory_count,
             memory_store_size_bytes=run_result.memory_store_size_bytes,
@@ -438,6 +505,8 @@ class Runner:
             # Gain-vs-stateless is computed during aggregation (needs the matched
             # stateless baseline). For the stateless system itself the gain is 0.
             memory_utility_gain_vs_stateless=0.0 if self.memory_system == "stateless" else None,
+            memory_backend_available=self.memory.available,
+            memory_uses_local_fallback=self.memory.uses_local_fallback,
             failure_category=failure,
             error=run_result.error,
             requested_model=rm.requested_model,
@@ -472,6 +541,8 @@ class Runner:
             resolved_model=rm.resolved_model,
             provider_family=rm.provider_family,
             benchmark_tier=rm.benchmark_tier,
+            memory_backend_available=self.memory.available,
+            memory_uses_local_fallback=self.memory.uses_local_fallback,
         )
 
     @staticmethod

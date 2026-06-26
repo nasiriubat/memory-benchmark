@@ -44,7 +44,8 @@ class OpenAIClient(LLMClient):
         max_output_tokens: int = 4096,
         base_url: str | None = None,
         api_key: str | None = None,
-        max_retries: int = 4,
+        max_retries: int = 6,
+        reasoning: dict[str, Any] | None = None,
     ) -> None:
         self.requested_model = requested_model
         self.resolved_model = resolved_model
@@ -54,6 +55,7 @@ class OpenAIClient(LLMClient):
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
         self.max_retries = max_retries
+        self.reasoning = reasoning or {}
 
         self.base_url = base_url or os.environ.get(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
@@ -104,6 +106,12 @@ class OpenAIClient(LLMClient):
                 "Omitting temperature for model %s (API default only).",
                 self.resolved_model,
             )
+            # Reasoning models (gpt-5/o1/o3/o4) accept a reasoning_effort control.
+            # Without this, the configured effort is silently ignored and the API
+            # default is used. effort drives output (reasoning) tokens => cost.
+            if self.reasoning.get("enabled"):
+                effort = self.reasoning.get("effort") or "medium"
+                params["reasoning_effort"] = effort
         if tools:
             params["tools"] = tools
             params["tool_choice"] = "auto"
@@ -167,11 +175,17 @@ class OpenAIClient(LLMClient):
         completion_details = usage.get("completion_tokens_details", {}) or {}
         reasoning_tokens = int(completion_details.get("reasoning_tokens", 0) or 0)
 
+        # OpenAI's ``completion_tokens`` ALREADY includes reasoning tokens
+        # (reasoning_tokens is a subset breakdown), and they are billed at the
+        # output rate. So we must NOT add a separate reasoning term here, or the
+        # ~80% of output that is reasoning would be double-charged. Pass
+        # reasoning_tokens=0 to the cost estimate; we still report the true
+        # reasoning_tokens on the response below for analysis.
         cost = estimate_cost_usd(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached,
-            reasoning_tokens=reasoning_tokens,
+            reasoning_tokens=0,
             pricing=self.pricing,
         )
 
