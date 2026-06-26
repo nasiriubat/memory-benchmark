@@ -22,6 +22,10 @@ previous, then aggregate against the **already-finished `stateless` baseline**.
 > judge's usage is now tracked separately in `judge_input_tokens`/`judge_output_tokens`/
 > `judge_cost_usd`, and **`total_cost_usd = agent + judge`** is the true per-row spend. `success` is
 > all-or-nothing across a task's subtasks — read `progress_score`/`score` for graded signal.
+> **`memory_utility_gain_vs_stateless` is `null` in the per-system `results.jsonl` by design** — it is
+> a derived metric, computed only at `make aggregate` (needs the `stateless` baseline on the same
+> RUN_ID/tasks) and written to `results/aggregated/` + the dashboard, never the per-system file. Run
+> order doesn't matter; you just need both `stateless` and the memory system present, then aggregate.
 
 ## `.env` scope block (already set)
 

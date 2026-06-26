@@ -133,8 +133,10 @@ Per result row (`results/by_memory_system/<system>/<run_id>/results.jsonl`):
   `success`.
 - **Memory utility** — `memory_relevance_score`, `memory_correctness_score`, `memory_usage_score`,
   `consistency_score`, and `memory_utility_gain_vs_stateless` (this row's `score` minus the matched
-  stateless row's, joined on `model/benchmark/domain/task_id/seed` — hence stateless must run first
-  on the same config).
+  stateless row's, joined on `model/benchmark/domain/task_id/seed`). **The gain is `null` in the
+  per-system `results.jsonl` by design** — it's derived only at `make aggregate` (which needs the
+  stateless baseline on the same config/tasks) and appears in `results/aggregated/` + the dashboard,
+  not the per-system file.
 - **Behavior** — `retrieved_memory_count`, `written_memory_count`, latencies,
   `memory_backend_available`, `memory_uses_local_fallback`.
 

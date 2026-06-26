@@ -150,6 +150,11 @@ class SubtaskRun(BaseModel):
     retrieved_memory_count: int = 0
     written_memory_count: int = 0
     llm: LLMResponse | None = None
+    # LLM-judge usage spent grading THIS subtask's answer correctness (if any).
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
+    judge_reasoning_tokens: int = 0
+    judge_cost_usd: float = 0.0
     error: str | None = None
 
 

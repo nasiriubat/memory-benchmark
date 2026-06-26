@@ -17,6 +17,7 @@ from typing import Any
 from benchmark.agents.base_agent import Agent
 from benchmark.evaluators.consistency import FactLedger, score_consistency
 from benchmark.evaluators.exact_match import score_answer
+from benchmark.evaluators.llm_judge import judge as judge_answer
 from benchmark.evaluators.memory_utility import (
     memory_usage_score,
     retrieval_correctness_score,
@@ -121,6 +122,10 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
         super().__init__(config)
         self.event_logger = event_logger
         self.judge_model = judge_model
+        # How subtask answers are graded: "token_f1" (deterministic) or
+        # "llm_judge" (semantic, needed for MemoryArena's id/structured answers).
+        self.answer_scorer = (self.config.get("answer_correctness_scorer") or "token_f1")
+        self.answer_rubric = self.config.get("answer_correctness_rubric") or ""
         # Auxiliary per-subtask signals captured during run_task and consumed by
         # score_task (keyed by (task_id, seed, subtask_id, subtask_index) so
         # concurrent iterations/tasks never collide).
@@ -246,13 +251,31 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
                 iteration=subtask_index,
             )
 
-        # 3. Score the subtask answer (deterministic; official adapters override).
-        sub_score = score_answer(answer.final_answer, subtask.expected_answer,
-                                 f1_threshold=self.correct_threshold)
+        # 3. Score the subtask answer. token_f1 is deterministic token overlap;
+        # llm_judge grades answer-vs-expected semantically (needed for answers
+        # keyed on ids/structured formats the agent cannot reproduce, e.g.
+        # MemoryArena ASINs). The judge's usage/cost is tallied per subtask.
+        judge_usage = None
+        if self.answer_scorer == "llm_judge" and self.judge_model is not None:
+            judge_usage = _JudgeUsageTracker(self.judge_model)
+            verdict = judge_answer(
+                model=judge_usage,
+                question=subtask.question,
+                prediction=answer.final_answer,
+                expected=subtask.expected_answer,
+                rubric=self.answer_rubric,
+            )
+            sub_score = verdict.score
+        else:
+            sub_score = score_answer(answer.final_answer, subtask.expected_answer,
+                                     f1_threshold=self.correct_threshold)
         correct = sub_score >= self.correct_threshold
         if log:
-            log.emit("evaluator_score", {"subtask_id": subtask.id, "score": sub_score,
-                                         "correct": correct},
+            log.emit("evaluator_score",
+                     {"subtask_id": subtask.id, "score": sub_score, "correct": correct,
+                      "scorer": self.answer_scorer,
+                      "output": (answer.final_answer or "")[:1000],
+                      "expected": (subtask.expected_answer or "")[:1000]},
                      task_id=task.id, subtask_id=subtask.id, iteration=subtask_index)
 
         # 4. Update the fact ledger and write memory after the subtask.
@@ -301,6 +324,10 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
             retrieved_memory_count=len(retrieved),
             written_memory_count=written,
             llm=answer.llm,
+            judge_input_tokens=judge_usage.input_tokens if judge_usage else 0,
+            judge_output_tokens=judge_usage.output_tokens if judge_usage else 0,
+            judge_reasoning_tokens=judge_usage.reasoning_tokens if judge_usage else 0,
+            judge_cost_usd=judge_usage.cost_usd if judge_usage else 0.0,
         )
         # Stash extra signals for scoring on the subtask metadata.
         sub_run_meta = {
@@ -319,6 +346,12 @@ class SequentialBenchmarkAdapter(BenchmarkAdapter):
         run_result.tool_call_count += len(sub.llm.tool_calls) if sub.llm else 0
         run_result.retrieved_memory_count += sub.retrieved_memory_count
         run_result.written_memory_count += sub.written_memory_count
+        # Per-subtask correctness-judge usage (memory-utility judge usage is
+        # added separately in score_task).
+        run_result.judge_input_tokens += sub.judge_input_tokens
+        run_result.judge_output_tokens += sub.judge_output_tokens
+        run_result.judge_reasoning_tokens += sub.judge_reasoning_tokens
+        run_result.judge_cost_usd += sub.judge_cost_usd
         if sub.llm is not None:
             run_result.input_tokens += sub.llm.input_tokens
             run_result.output_tokens += sub.llm.output_tokens
