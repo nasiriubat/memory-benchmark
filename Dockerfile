@@ -13,13 +13,19 @@ WORKDIR /app
 # Install uv for fast, reproducible dependency installation (falls back to pip).
 RUN pip install --no-cache-dir uv
 
-# Copy only dependency metadata first to leverage Docker layer caching.
+# --- Dependency layer (cached across source edits) ----------------------------
+# Copy only dependency metadata plus an empty package skeleton, then install all
+# third-party dependencies + extras. Because this layer does NOT depend on the
+# real source, editing code in src/ does not invalidate it: rebuilds reuse the
+# cached dependency install instead of re-downloading the whole scientific stack.
 COPY pyproject.toml README.md ./
-COPY src ./src
+RUN mkdir -p src/benchmark && touch src/benchmark/__init__.py
+RUN uv pip install --system --no-cache ".[ui,datasets,memory-hindsight,memory]"
 
-# Install the project with UI + datasets extras so the same image serves both
-# the benchmark runner services and the Streamlit UI service.
-RUN uv pip install --system --no-cache ".[ui,datasets,memory-hindsight]"
+# --- Source layer (cheap; re-runs on every code edit) -------------------------
+# The real source overrides the empty skeleton at import time via PYTHONPATH
+# (/app/src is on sys.path), so no project reinstall is needed after edits.
+COPY src ./src
 
 # Copy the remainder of the project (configs/data/results are also mounted at runtime).
 COPY . .

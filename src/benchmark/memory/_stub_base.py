@@ -37,6 +37,11 @@ class StubMemoryAdapter(MemoryAdapter):
         )
         self._api_key = os.environ.get(self.api_key_env or "", "")
         self.available, self.unavailable_reason = self._detect_backend()
+        # The stub adapters do not yet implement the real SDK calls (see the
+        # ``# REAL SDK:`` markers below): they always serve operations from the
+        # local store. Record that honestly so results are never mistaken for a
+        # measurement of the real backend, even when it was detected.
+        self.uses_local_fallback = True
         if not self.available:
             self.log.warning(
                 "%s adapter unavailable (%s). Falling back to local namespace-isolated "
@@ -45,7 +50,13 @@ class StubMemoryAdapter(MemoryAdapter):
                 self.unavailable_reason,
             )
         else:
-            self.log.info("%s adapter detected real backend at %s.", self.name, self.base_url)
+            self.log.warning(
+                "%s adapter detected a backend at %s but the real SDK path is not "
+                "implemented yet; serving from the local fallback store. Results are "
+                "marked uses_local_fallback=true.",
+                self.name,
+                self.base_url,
+            )
 
     def _detect_backend(self) -> tuple[bool, str | None]:
         """Detect whether the real SDK + self-hosted backend appear usable."""

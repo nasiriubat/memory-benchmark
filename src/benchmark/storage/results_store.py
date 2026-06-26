@@ -14,6 +14,7 @@ aggregation. This module focuses on the canonical per-system folder.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,9 @@ class ResultsStore:
         self.run_id = run_id
         self._jsonl = self.dir / "results.jsonl"
         self._rows: list[dict[str, Any]] = []
+        # Guards both the JSONL append and the in-memory row buffer so the
+        # store is safe to call from multiple model threads (model_parallelism).
+        self._lock = threading.Lock()
 
     def write_metadata(self, metadata: RunMetadata) -> None:
         path = self.dir / "run_metadata.json"
@@ -41,19 +45,29 @@ class ResultsStore:
         _log.info("Wrote run metadata to %s", path)
 
     def append(self, result: TaskResult) -> None:
-        """Append a single task result (JSONL immediately; tabular on flush)."""
-        with self._jsonl.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(result.model_dump(), default=str) + "\n")
-        self._rows.append(result.flatten())
+        """Append a single task result (JSONL immediately; tabular on flush).
+
+        Thread-safe: the lock serializes the file write and the row buffer
+        append so concurrent model threads cannot interleave a JSONL line or
+        race the list.
+        """
+        line = json.dumps(result.model_dump(), default=str) + "\n"
+        row = result.flatten()
+        with self._lock:
+            with self._jsonl.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+            self._rows.append(row)
 
     def flush_tabular(self) -> None:
         """Write the accumulated rows to CSV and Parquet."""
-        if not self._rows:
+        with self._lock:
+            rows = list(self._rows)
+        if not rows:
             _log.warning("No results to flush for %s/%s.", self.memory_system, self.run_id)
             return
         import pandas as pd
 
-        df = pd.DataFrame(self._rows)
+        df = pd.DataFrame(rows)
         csv_path = self.dir / "results.csv"
         df.to_csv(csv_path, index=False)
         try:
@@ -65,4 +79,5 @@ class ResultsStore:
 
     @property
     def rows(self) -> list[dict[str, Any]]:
-        return self._rows
+        with self._lock:
+            return list(self._rows)

@@ -46,6 +46,7 @@ def build_llm_client(rm: ResolvedModel, config: AppConfig) -> LLMClient:
             pricing=rm.pricing,
             temperature=rm.temperature,
             max_output_tokens=rm.max_output_tokens,
+            reasoning=rm.reasoning,
         )
 
     from benchmark.llms.openrouter_client import OpenRouterClient

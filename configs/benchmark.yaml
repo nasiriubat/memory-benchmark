@@ -4,8 +4,14 @@
 run:
   num_runs: 5
   retrieve_top_k: 3
+  # Parallelism (LLM calls are I/O-bound, so these are the main speed lever).
+  #   task_parallelism  : concurrent (task, iteration) jobs per model/domain.
+  #   model_parallelism : concurrent model slots. Safe to raise (result writes
+  #                       are locked); raising both multiplies provider
+  #                       concurrency, so mind OpenRouter rate limits.
+  # Override per run with TASK_PARALLELISM / MODEL_PARALLELISM env vars.
   model_parallelism: 1
-  task_parallelism: 1
+  task_parallelism: 4
   fail_fast: false
   cross_task_memory: false
   max_tasks_per_domain: 0
@@ -17,6 +23,7 @@ profiles:
   paper:
     num_runs: 5
     max_tasks_per_domain: 50
+    task_parallelism: 6
   # MemoryArena only: 100 tasks total (20 per config), STATE-Bench off.
   memoryarena_100:
     num_runs: 5
@@ -34,6 +41,7 @@ profiles:
   memoryarena_reasoning:
     num_runs: 5
     max_tasks_total: 0
+    task_parallelism: 8
     task_sample_strategy: sequential
     benchmark_task_seed: 42
     benchmarks:
@@ -46,12 +54,33 @@ profiles:
           - formal_reasoning_phys
       dfx:
         enabled: false
+  # Cost-efficient, memory-relevant preset: MemoryArena bundled_shopping only,
+  # 40 tasks (random, seed 42), 3 runs. Shopping is a multi-turn recall task
+  # (recall the right product/ASIN across turns) where memory genuinely matters.
+  memoryarena_shopping:
+    num_runs: 3
+    max_tasks_total: 40
+    task_parallelism: 8
+    task_sample_strategy: random
+    benchmark_task_seed: 42
+    benchmarks:
+      state_bench:
+        enabled: false
+      memoryarena:
+        enabled: true
+        configs:
+          - bundled_shopping
+      dfx:
+        enabled: false
   full:
     num_runs: 5
     max_tasks_per_domain: 0
+    task_parallelism: 6
   smoke:
     num_runs: 1
     max_tasks_per_domain: 1
+    # Keep smoke fully serial for a deterministic wiring check.
+    task_parallelism: 1
     benchmarks:
       state_bench:
         enabled: true
@@ -88,7 +117,10 @@ benchmarks:
 # Evaluator configuration.
 evaluators:
   # Judge model slot (resolved like any other model via the resolver).
-  llm_judge_model: openai_frontier
+  # Uses the cheap dedicated `judge` slot (benchmark_tier: judge) so memory
+  # relevance/usage/consistency scoring does not run on the expensive frontier
+  # model. The runner excludes judge-tier slots from the system-under-test loop.
+  llm_judge_model: judge
   # Prefer official benchmark scores, then deterministic checks, then judge.
   rule_compliance_order: ["official", "deterministic", "llm_judge"]
 
