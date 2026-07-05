@@ -1,4 +1,4 @@
-.PHONY: build stateless hindsight acontext mem0 zep supermemory aggregate ui down test snapshot run-all run-all-docker smoke init-run paper-init clear
+.PHONY: build stateless hindsight acontext mem0 zep aggregate ui down test snapshot run-all run-all-docker smoke init-run paper-init clear
 
 # Clear all results and stop containers.
 clear:
@@ -51,9 +51,6 @@ mem0:
 
 zep:
 	bash scripts/run_one.sh zep
-
-supermemory:
-	bash scripts/run_one.sh supermemory
 
 # Aggregate all results into results/aggregated/.
 aggregate:

@@ -9,6 +9,7 @@ set ``available = False``, and behave as no-ops (never raising into the runner).
 from __future__ import annotations
 
 import abc
+import threading
 from typing import Any
 
 from benchmark.logging import get_logger
@@ -24,15 +25,34 @@ class MemoryAdapter(abc.ABC):
     available: bool = True
     #: Reason captured when ``available`` is False.
     unavailable_reason: str | None = None
-    #: True when memory operations are (or have been) served by the local
-    #: namespace-isolated fallback store rather than the real backend SDK. This
-    #: is recorded on every result so a run that silently degraded to the local
-    #: store is never mistaken for a measurement of the real memory system.
-    uses_local_fallback: bool = False
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}
         self.log = get_logger(f"benchmark.memory.{self.name}")
+        # Backend was unavailable at startup -> the WHOLE run uses the local
+        # fallback (sticky). Set via ``self._unavailable_fallback = True``.
+        self._unavailable_fallback = False
+        # Per-task fallback marker. ``uses_local_fallback`` is recorded on every
+        # result row, so it must reflect whether THAT task's memory ops fell back
+        # (not a sticky global flag). Tracked thread-local because tasks run
+        # concurrently under TASK_PARALLELISM (one task per worker thread), and
+        # cleared at the start of each task by the runner.
+        self._task_fb = threading.local()
+
+    @property
+    def uses_local_fallback(self) -> bool:
+        """True when this task's (or the whole run's) memory ops used the local
+        fallback store rather than the real backend."""
+        return self._unavailable_fallback or getattr(self._task_fb, "hit", False)
+
+    @uses_local_fallback.setter
+    def uses_local_fallback(self, value: bool) -> None:
+        # Op-time fallbacks set this True and mark the CURRENT task only.
+        self._task_fb.hit = bool(value)
+
+    def clear_task_fallback(self) -> None:
+        """Reset the per-task fallback marker; called by the runner before each task."""
+        self._task_fb.hit = False
 
     @abc.abstractmethod
     def setup(self, namespace: MemoryNamespace) -> None:

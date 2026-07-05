@@ -56,7 +56,7 @@ class AContextAdapter(MemoryAdapter):
         self._api_key = os.environ.get("ACONTEXT_API_KEY", "")
         self.available, self.unavailable_reason = self._connect()
         if not self.available:
-            self.uses_local_fallback = True
+            self._unavailable_fallback = True
             self.log.warning(
                 "acontext unavailable (%s). Using local namespace-isolated fallback.",
                 self.unavailable_reason,

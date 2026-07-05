@@ -39,16 +39,9 @@ memory_systems:
     base_url_env: ZEP_BASE_URL
     api_key_env: ZEP_API_KEY
 
-  # Dropped from the campaign: Supermemory's backend is closed-source and real
-  # self-hosting is enterprise-only (no public server image). Adapter code is
-  # retained but disabled; set enabled: true + point at the cloud API to use it.
-  supermemory:
-    adapter: benchmark.memory.supermemory:SupermemoryAdapter
-    description: "Retrieval-based persistent memory."
-    enabled: false
-    self_hosted: true
-    base_url_env: SUPERMEMORY_BASE_URL
-    api_key_env: SUPERMEMORY_API_KEY
+  # NOTE: Supermemory (paper Table I) is NOT evaluated — its backend is
+  # closed-source and real self-hosting is enterprise-only, so it is omitted
+  # from this benchmark rather than run against a stub.
 
   # Optional, disabled by default. Built-in proprietary memory (paper Table I).
   # To be completed with the industrial partner.

@@ -90,9 +90,8 @@ make aggregate
 make ui                                       # http://localhost:8501
 ```
 
-> **supermemory was dropped** (its backend is closed-source; real self-hosting is
-> enterprise-only). It is disabled in `configs/memory_systems.yaml`. To include it,
-> point at the Supermemory cloud API (`SUPERMEMORY_API_KEY` + base URL) and re-enable it.
+> **Supermemory (paper Table I) is not evaluated** — its backend is closed-source and self-hosting
+> is enterprise-only, so it is omitted from the benchmark (no runner, no adapter).
 
 ### Memory-system backends (what each `make` needs)
 
@@ -144,9 +143,9 @@ print('hindsight uses_local_fallback:', dict(collections.Counter(json.loads(l).g
 "
 ```
 
-Want `{False: N}`. `True` ⇒ the `hindsight-server` backend was unreachable and it measured
-the local store. (mem0/zep/acontext/supermemory are local-store **stubs** and will report
-`true` by design — only hindsight's flag is meaningful.)
+Want `{False: N}` for every system. `True` ⇒ that task's memory ops fell back to the local store
+(backend unreachable) and the row is not a real measurement. All of hindsight/mem0/zep/acontext are
+real adapters now, so the flag is meaningful for each; the check applies to all of them.
 
 ---
 

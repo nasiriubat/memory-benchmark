@@ -5,8 +5,8 @@ A reproducible, Docker-managed harness that compares **LLM-agent memory systems*
 mechanism — not to the model, the tasks, or an internal helper LLM.
 
 - **Memory systems (all real, self-hosted):** `stateless` (baseline), `hindsight`, `mem0`, `zep`,
-  `acontext`. (`supermemory` is **dropped** — its backend is closed-source / enterprise-only; the
-  adapter is kept but disabled in `configs/memory_systems.yaml`.)
+  `acontext`. (Supermemory from the paper's Table I is **not evaluated** — its backend is
+  closed-source and self-hosting is enterprise-only, so it is omitted rather than stubbed.)
 - **LLM provider (this branch):** **direct OpenAI**. Agent = `gpt-5.5` at `reasoning.effort: medium`;
   LLM judge = cheap `gpt-4o-mini`; memory-system internal extraction = `gpt-4o-mini` (consistent &
   cheap). An OpenRouter multi-provider path also exists — see [Multi-provider](#multi-provider-openrouter).

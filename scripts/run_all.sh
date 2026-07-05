@@ -37,7 +37,7 @@ MODELS="${MODELS:-openai_frontier,anthropic_frontier,google_frontier,meta_fronti
 if [[ "$#" -gt 0 ]]; then
   SYSTEMS=("$@")
 else
-  SYSTEMS=(stateless hindsight acontext mem0 zep supermemory)
+  SYSTEMS=(stateless hindsight acontext mem0 zep)
 fi
 
 # One shared run id across every system.

@@ -407,6 +407,10 @@ class Runner:
         seed = _BASE_SEED + iteration
         ns = self._build_memory_namespace(bench_name, domain, slot, task.id, seed)
         try:
+            # Reset the per-task fallback marker so this row's uses_local_fallback
+            # reflects only THIS task's memory ops (this runs in the task's own
+            # worker thread; the marker is thread-local).
+            self.memory.clear_task_fallback()
             # Each (task, seed) namespace starts clean to guarantee isolation.
             adapter_mem_reset = not (
                 self.config.run.cross_task_memory and iteration == 0

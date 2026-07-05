@@ -65,8 +65,6 @@ x-benchmark-env: &benchmark-env
   MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-gpt-4o-mini}
   ZEP_BASE_URL: ${ZEP_BASE_URL:-http://zep:8000}
   ZEP_API_KEY: ${ZEP_API_KEY:-}
-  SUPERMEMORY_BASE_URL: ${SUPERMEMORY_BASE_URL:-http://supermemory:8000}
-  SUPERMEMORY_API_KEY: ${SUPERMEMORY_API_KEY:-}
 
 x-benchmark-base: &benchmark-base
   build:
@@ -135,16 +133,6 @@ services:
     depends_on:
       - zep-backend
 
-  supermemory:
-    <<: *benchmark-base
-    profiles: ["supermemory"]
-    environment:
-      <<: *benchmark-env
-      MEMORY_SYSTEM: supermemory
-    command: python scripts/run_memory_system.py --memory-system supermemory
-    depends_on:
-      - supermemory-backend
-
   # === Self-hosted memory backends (internal-only ports via `expose`) ======
   # mem0 uses a self-hosted Qdrant vector store.
   mem0-qdrant:
@@ -200,7 +188,7 @@ services:
     depends_on:
       - zep-postgres
 
-  # Hindsight / AContext / Supermemory self-hosted services.
+  # Hindsight / AContext self-hosted services.
   # These reference local build contexts under ./selfhosted/<system> if you
   # vendor the upstream repos; otherwise the adapter logs "unavailable" and
   # degrades gracefully. Replace `image`/`build` with the real upstream as
@@ -240,18 +228,6 @@ services:
   # The default-project SDK key is sk-ac-<ROOT_API_BEARER_TOKEN> (already set as
   # ACONTEXT_API_KEY in .env). See RUNBOOK "AContext setup".
 
-  supermemory-backend:
-    image: ${SUPERMEMORY_IMAGE:-ghcr.io/supermemoryai/supermemory:latest}
-    # Starts together with the `supermemory` runner (was a separate profile that
-    # never came up with the runner). NOTE: the default image ref above is a
-    # placeholder and is NOT publicly pullable — set SUPERMEMORY_IMAGE to a real
-    # image (or a local build context) before running this profile.
-    profiles: ["supermemory"]
-    container_name: supermemory
-    networks:
-      - benchnet
-    expose:
-      - "8000"
 
   # === Aggregation =========================================================
   aggregator:

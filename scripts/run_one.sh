@@ -20,7 +20,7 @@ source "$(dirname "$0")/_docker.sh"
 SYSTEM="${1:-}"
 if [[ -z "${SYSTEM}" ]]; then
   echo "Usage: scripts/run_one.sh <memory_system> [extra runner args]" >&2
-  echo "  memory systems: stateless hindsight acontext mem0 zep supermemory" >&2
+  echo "  memory systems: stateless hindsight acontext mem0 zep" >&2
   exit 1
 fi
 shift || true

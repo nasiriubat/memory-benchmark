@@ -21,6 +21,13 @@ from benchmark.memory.local_store import LocalMemoryStore
 from benchmark.schemas import MemoryNamespace, MemoryRecord, MemoryWriteResult
 from benchmark.utils import utcnow_iso
 
+# Hindsight's /recall API rejects queries longer than 500 tokens. The benchmark
+# uses the full (often long) subtask prompt as the recall query, so truncate it
+# to a conservative char budget (~400 tokens) before recall; a retry halves it
+# further if hindsight still reports "too long".
+_RECALL_QUERY_CHAR_BUDGET = 1600
+
+
 def _bank_id(namespace: MemoryNamespace) -> str:
     """Stable bank id from the benchmark namespace (path-safe, bounded length)."""
     key = namespace.flat_key()
@@ -51,7 +58,7 @@ class HindsightAdapter(MemoryAdapter):
         self._api_key = os.environ.get(self.api_key_env, "")
         self.available, self.unavailable_reason = self._connect()
         if not self.available:
-            self.uses_local_fallback = True
+            self._unavailable_fallback = True
             self.log.warning(
                 "hindsight unavailable (%s). Using local namespace-isolated fallback.",
                 self.unavailable_reason,
@@ -158,8 +165,19 @@ class HindsightAdapter(MemoryAdapter):
         # Note: end-to-end retrieval latency is measured by the runner around
         # this call (see SequentialBenchmarkAdapter._run_subtask) and recorded
         # as memory_retrieval_latency_ms; no separate timer is needed here.
-        try:
-            response = client.recall(bid, query, max_tokens=4096)
+        # Truncate the query to stay under hindsight's 500-token recall cap, and
+        # halve-and-retry if the server still reports it too long.
+        q = query if len(query) <= _RECALL_QUERY_CHAR_BUDGET else query[:_RECALL_QUERY_CHAR_BUDGET]
+        for attempt in range(3):
+            try:
+                response = client.recall(bid, q, max_tokens=4096)
+            except Exception as exc:  # noqa: BLE001
+                if "too long" in str(exc).lower() and len(q) > 200 and attempt < 2:
+                    q = q[: len(q) // 2]
+                    continue
+                self.uses_local_fallback = True
+                self.log.warning("hindsight recall failed (%s); fallback store", exc)
+                return self._fallback.retrieve(query, top_k, ns)
             records: list[MemoryRecord] = []
             for i, item in enumerate((response.results or [])[:top_k]):
                 text = getattr(item, "text", None) or str(item)
@@ -174,10 +192,9 @@ class HindsightAdapter(MemoryAdapter):
                     )
                 )
             return records
-        except Exception as exc:  # noqa: BLE001
-            self.uses_local_fallback = True
-            self.log.warning("hindsight recall failed (%s); fallback store", exc)
-            return self._fallback.retrieve(query, top_k, ns)
+        # Retries exhausted.
+        self.uses_local_fallback = True
+        return self._fallback.retrieve(query, top_k, ns)
 
     def write(self, record: MemoryRecord, metadata: dict[str, Any]) -> MemoryWriteResult:
         ns = self._require_namespace(metadata)

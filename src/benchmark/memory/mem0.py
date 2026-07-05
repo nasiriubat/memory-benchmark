@@ -56,7 +56,7 @@ class Mem0Adapter(MemoryAdapter):
         ).rstrip("/")
         self.available, self.unavailable_reason = self._connect()
         if not self.available:
-            self.uses_local_fallback = True
+            self._unavailable_fallback = True
             self.log.warning(
                 "mem0 unavailable (%s). Using local namespace-isolated fallback.",
                 self.unavailable_reason,

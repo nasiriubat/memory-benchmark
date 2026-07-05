@@ -22,7 +22,6 @@ MEMORY_SYSTEMS_ORDER: list[str] = [
     "acontext",
     "mem0",
     "zep",
-    "supermemory",
 ]
 
 Status = Literal["pending", "running", "done", "failed"]

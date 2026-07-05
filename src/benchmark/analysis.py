@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from benchmark.logging import get_logger
-from benchmark.metrics import reliability
+from benchmark.metrics import pass_at_k
 
 _log = get_logger("benchmark.analysis")
 
@@ -119,7 +119,7 @@ def summary_by_memory_model(df: pd.DataFrame) -> pd.DataFrame:
         return df
     keys = ["memory_system", "model_display"] if "model_display" in df.columns else ["memory_system", "model"]
     grp = df.groupby(keys)
-    out = _summarize(grp).reset_index()
+    out = _summarize(grp, _runs_per_task(df)).reset_index()
     if "model_display" in out.columns:
         out = out.rename(columns={"model_display": "model"})
     return out
@@ -129,35 +129,51 @@ def summary_by_benchmark(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     grp = df.groupby(["memory_system", "benchmark"])
-    return _summarize(grp).reset_index()
+    return _summarize(grp, _runs_per_task(df)).reset_index()
 
 
-def _pass_at_5_for_group(g: pd.DataFrame) -> float:
-    """Mean pass@5 across tasks (multiple seeds per task_id)."""
+def _runs_per_task(df: pd.DataFrame) -> int:
+    """Repeated runs per task (== num_runs). Drives the pass@k label so it never
+    hard-codes a stale k (e.g. reporting pass@5 when only 3 runs were executed)."""
+    if df.empty or "task_id" not in df.columns:
+        return 0
+    keys = [c for c in ("memory_system", "model", "task_id") if c in df.columns]
+    if not keys:
+        return 0
+    counter = df.groupby(keys)["seed"].nunique() if "seed" in df.columns else df.groupby(keys).size()
+    return int(counter.max()) if len(counter) else 0
+
+
+def _pass_at_k_for_group(g: pd.DataFrame, k: int) -> float:
+    """Mean pass@k across tasks (any success within the k repeated runs)."""
     if g.empty or "task_id" not in g.columns:
         return float("nan")
     passes: list[float] = []
     for _, tg in g.groupby("task_id"):
         succ = tg["success"].astype(bool).tolist()
-        scores = pd.to_numeric(tg["score"], errors="coerce").fillna(0.0).tolist()
         if succ:
-            passes.append(reliability(scores, succ).pass_at_5)
+            passes.append(pass_at_k(succ, k if k > 0 else len(succ)))
     return float(np.mean(passes)) if passes else float("nan")
 
 
-def _summarize(grp: Any) -> pd.DataFrame:
+def _summarize(grp: Any, k: int = 0) -> pd.DataFrame:
+    # Name the reliability column after the actual number of repeated runs.
+    pass_col = f"pass_at_{k}" if k > 0 else "pass_at_k"
+
     def _one(g: pd.DataFrame) -> pd.Series:
         out: dict[str, Any] = {
             "n": len(g),
             "task_success_rate": _safe_mean(g["success"].astype(float)),
-            "pass_at_5": _pass_at_5_for_group(g),
+            pass_col: _pass_at_k_for_group(g, k),
             "mean_score": _safe_mean(g["score"]),
             "progress_score": _safe_mean(g["progress_score"]),
             "consistency_score": _safe_mean(g["consistency_score"]),
             "memory_utility_gain_vs_stateless": _safe_mean(
                 g.get("memory_utility_gain_vs_stateless", pd.Series(dtype=float))
             ),
-            "mean_cost_usd": _safe_mean(g["estimated_cost_usd"]),
+            "mean_cost_usd": _safe_mean(
+                g.get("total_cost_usd", g["estimated_cost_usd"])  # agent + judge
+            ),
             "mean_latency_ms": _safe_mean(g["latency_ms"]),
             "total_tokens": _safe_mean(g["total_tokens"]),
         }
@@ -169,16 +185,98 @@ def _summarize(grp: Any) -> pd.DataFrame:
 
 
 def leaderboard(df: pd.DataFrame) -> pd.DataFrame:
-    """Rank memory systems by overall task success then mean score."""
+    """Rank memory systems by progress score then memory-utility gain.
+
+    (Full-task success is all-or-nothing and ~0 on hard tasks, so it is a poor
+    sort key; progress_score / gain are the paper's primary performance metrics.)
+    """
     if df.empty:
         return df
     grp = df.groupby("memory_system")
-    board = _summarize(grp).reset_index()
+    board = _summarize(grp, _runs_per_task(df)).reset_index()
     board = board.sort_values(
-        by=["task_success_rate", "mean_score"], ascending=False
+        by=["progress_score", "memory_utility_gain_vs_stateless"], ascending=False
     ).reset_index(drop=True)
     board.insert(0, "rank", board.index + 1)
     return board
+
+
+def paper_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-memory-system summary aligned to the paper (Section III-H).
+
+    One row per system with the primary performance metrics (progress score,
+    gain vs stateless), memory-use quality (relevance/correctness/usage),
+    learning (improvement slope), memory behaviour, and efficiency.
+    """
+    if df.empty:
+        return df
+
+    def _one(g: pd.DataFrame) -> pd.Series:
+        def m(col: str) -> float:
+            return _safe_mean(g[col]) if col in g.columns else float("nan")
+
+        return pd.Series(
+            {
+                "n": len(g),
+                "progress_score": m("progress_score"),
+                "mean_score": m("score"),
+                "gain_vs_stateless": m("memory_utility_gain_vs_stateless"),
+                "consistency": m("consistency_score"),
+                "relevance": m("memory_relevance_score"),
+                "correctness": m("memory_correctness_score"),
+                "usage": m("memory_usage_score"),
+                "improvement_slope": m("official_memoryarena_improvement_slope"),
+                "retrieved": m("retrieved_memory_count"),
+                "written": m("written_memory_count"),
+                "total_cost_usd": m("total_cost_usd")
+                if "total_cost_usd" in g.columns
+                else m("estimated_cost_usd"),
+                "latency_ms": m("latency_ms"),
+                "full_task_success": m("success"),
+            }
+        )
+
+    out = df.groupby("memory_system").apply(_one, include_groups=False).reset_index()
+    return out.sort_values("progress_score", ascending=False).reset_index(drop=True)
+
+
+def subtask_trend(results_root: "Path") -> pd.DataFrame:
+    """Mean subtask score by subtask position, per memory system (RQ2 learning
+    curve). Reads ``evaluator_score`` events from the raw event logs the runner
+    writes under ``results/raw/<run>/<system>/**/events.jsonl``."""
+    import json
+    import re
+
+    raw = results_root / "raw"
+    rows: list[tuple[str, int, float]] = []
+    if raw.exists():
+        for ev in raw.glob("**/events.jsonl"):
+            parts = ev.relative_to(raw).parts  # (run_id, system, model, benchmark, domain, ...)
+            if len(parts) < 2:
+                continue
+            system = parts[1]
+            for line in ev.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if e.get("event_type") != "evaluator_score":
+                    continue
+                match = re.search(r"(\d+)", str(e.get("subtask_id") or ""))
+                score = (e.get("payload") or {}).get("score")
+                if not match or score is None:
+                    continue
+                rows.append((system, int(match.group(1)), float(score)))
+    if not rows:
+        return pd.DataFrame(columns=["memory_system", "subtask_index", "mean_score", "n"])
+    d = pd.DataFrame(rows, columns=["memory_system", "subtask_index", "score"])
+    return (
+        d.groupby(["memory_system", "subtask_index"])["score"]
+        .agg(mean_score="mean", n="size")
+        .reset_index()
+    )
 
 
 def failure_categories(df: pd.DataFrame) -> pd.DataFrame:
@@ -201,12 +299,13 @@ def aggregation_views(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     views: dict[str, pd.DataFrame] = {}
     views["memory_system_x_model"] = summary_by_memory_model(df)
     views["memory_system_x_benchmark"] = summary_by_benchmark(df)
+    k = _runs_per_task(df)
     views["memory_system_x_domain"] = _summarize(
-        df.groupby(["memory_system", "domain"])
+        df.groupby(["memory_system", "domain"]), k
     ).reset_index()
     model_key = "model_display" if "model_display" in df.columns else "model"
     views["model_x_benchmark"] = _summarize(
-        df.groupby([model_key, "benchmark"])
+        df.groupby([model_key, "benchmark"]), k
     ).reset_index()
     if model_key == "model_display":
         views["model_x_benchmark"] = views["model_x_benchmark"].rename(
