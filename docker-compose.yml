@@ -154,7 +154,8 @@ services:
 
   # Zep Community Edition + its Postgres (self-hosted, internal only).
   zep-postgres:
-    image: postgres:16-alpine
+    # Zep 0.27 stores embeddings via pgvector, so plain postgres is not enough.
+    image: pgvector/pgvector:pg16
     profiles: ["zep"]
     networks:
       - benchnet
@@ -176,13 +177,20 @@ services:
     networks:
       - benchnet
     environment:
+      # Zep 0.27.x config keys map to ZEP_<UPPER_SNAKE> env vars.
+      ZEP_STORE_TYPE: postgres
       ZEP_STORE_POSTGRES_DSN: postgres://zep:zep@zep-postgres:5432/zep?sslmode=disable
-      # Zep CE runs its own LLM extraction. Exact env keys vary by Zep image
-      # version; these cover the common graphiti-based CE config. Adjust to match
-      # your image. Uses the same OpenAI key as the benchmark by default.
+      ZEP_AUTH_REQUIRED: "false"
+      ZEP_SERVER_PORT: "8000"
+      # Use OpenAI for LLM + embeddings so no local NLP sidecar is required.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ZEP_LLM_SERVICE: openai
       ZEP_LLM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      MODEL_NAME: ${ZEP_LLM_MODEL:-gpt-4o-mini}
+      ZEP_LLM_MODEL: ${ZEP_LLM_MODEL:-gpt-4o-mini}
+      ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_SERVICE: openai
+      ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_DIMENSIONS: "1536"
+      ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_SERVICE: openai
+      ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_DIMENSIONS: "1536"
     expose:
       - "8000"
     depends_on:
@@ -243,6 +251,13 @@ services:
     profiles: ["ui"]
     environment:
       <<: *benchmark-env
+    # Also mount docs/ so the dashboard can read + serve the report, figures,
+    # and the Excel workbook (kept in docs/ for the UI).
+    volumes:
+      - ./results:/app/results
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./docs:/app/docs
     command: streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
     ports:
       - "8501:8501"

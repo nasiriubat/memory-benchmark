@@ -104,12 +104,12 @@ models:
       effort: high
     use_latest_alias: true
 
-  # Optional budget models (disabled by default).
+  # OpenRouter agent backbone: Gemini 3.5 Flash (pinned exact id, not "latest").
   google_fast:
-    enabled: false
+    enabled: true
     provider: openrouter
     provider_family: google
-    requested_model: "~google/gemini-flash-latest"
+    requested_model: "google/gemini-3.5-flash"
     concrete_fallback_model: "google/gemini-3.5-flash"
     benchmark_tier: fast
     temperature: 0
@@ -117,4 +117,19 @@ models:
     reasoning:
       enabled: false
       effort: null
-    use_latest_alias: true
+    use_latest_alias: false
+
+  # OpenRouter agent backbone: Claude Opus 4.8 (pinned exact id).
+  anthropic_opus:
+    enabled: true
+    provider: openrouter
+    provider_family: anthropic
+    requested_model: "anthropic/claude-opus-4.8"
+    concrete_fallback_model: "anthropic/claude-opus-4.8"
+    benchmark_tier: frontier
+    temperature: 0
+    max_output_tokens: 4096
+    reasoning:
+      enabled: false
+      effort: null
+    use_latest_alias: false

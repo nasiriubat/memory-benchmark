@@ -13,6 +13,7 @@ rows and never mutate global state.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,21 @@ _MATCH_KEYS = ["model", "benchmark", "domain", "task_id", "seed"]
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+def _read_text_resilient(path: Path, attempts: int = 25) -> str:
+    """Read a file, retrying on the transient OSError (EAGAIN/EDEADLK, "Resource
+    deadlock avoided") that cloud-synced filesystems (OneDrive) raise while their
+    sync process holds the file. Returns "" if it never succeeds (logged)."""
+    for attempt in range(attempts):
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as exc:
+            if attempt == attempts - 1:
+                _log.warning("could not read %s after %d attempts: %s", path, attempts, exc)
+                return ""
+            time.sleep(0.05 * (attempt + 1))
+    return ""
+
+
 def load_all_results(results_root: Path) -> pd.DataFrame:
     """Load every task result row from the per-memory-system folders."""
     rows: list[dict[str, Any]] = []
@@ -38,7 +54,7 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
     if not by_system.exists():
         return pd.DataFrame()
     for jsonl in by_system.glob("*/*/results.jsonl"):
-        for line in jsonl.read_text(encoding="utf-8").splitlines():
+        for line in _read_text_resilient(jsonl).splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -168,6 +184,15 @@ def _summarize(grp: Any, k: int = 0) -> pd.DataFrame:
             "mean_score": _safe_mean(g["score"]),
             "progress_score": _safe_mean(g["progress_score"]),
             "consistency_score": _safe_mean(g["consistency_score"]),
+            "memory_relevance_score": _safe_mean(
+                g.get("memory_relevance_score", pd.Series(dtype=float))
+            ),
+            "memory_correctness_score": _safe_mean(
+                g.get("memory_correctness_score", pd.Series(dtype=float))
+            ),
+            "memory_usage_score": _safe_mean(
+                g.get("memory_usage_score", pd.Series(dtype=float))
+            ),
             "memory_utility_gain_vs_stateless": _safe_mean(
                 g.get("memory_utility_gain_vs_stateless", pd.Series(dtype=float))
             ),
@@ -255,7 +280,8 @@ def subtask_trend(results_root: "Path") -> pd.DataFrame:
             if len(parts) < 2:
                 continue
             system = parts[1]
-            for line in ev.read_text(encoding="utf-8").splitlines():
+            model = parts[2] if len(parts) > 2 else "unknown"  # model slot
+            for line in _read_text_resilient(ev).splitlines():
                 if not line.strip():
                     continue
                 try:
@@ -268,12 +294,12 @@ def subtask_trend(results_root: "Path") -> pd.DataFrame:
                 score = (e.get("payload") or {}).get("score")
                 if not match or score is None:
                     continue
-                rows.append((system, int(match.group(1)), float(score)))
+                rows.append((system, model, int(match.group(1)), float(score)))
     if not rows:
-        return pd.DataFrame(columns=["memory_system", "subtask_index", "mean_score", "n"])
-    d = pd.DataFrame(rows, columns=["memory_system", "subtask_index", "score"])
+        return pd.DataFrame(columns=["memory_system", "model", "subtask_index", "mean_score", "n"])
+    d = pd.DataFrame(rows, columns=["memory_system", "model", "subtask_index", "score"])
     return (
-        d.groupby(["memory_system", "subtask_index"])["score"]
+        d.groupby(["memory_system", "model", "subtask_index"])["score"]
         .agg(mean_score="mean", n="size")
         .reset_index()
     )

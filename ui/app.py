@@ -24,6 +24,7 @@ if str(_SRC) not in sys.path:
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 AGG = RESULTS / "aggregated"
+DOCS = Path(__file__).resolve().parents[1] / "docs"
 
 # Columns that are always-null or pure clutter on the current OpenAI + MemoryArena
 # setup. Hidden from the drill-down and the filtered downloads; the raw
@@ -369,6 +370,58 @@ def _study_header(df: pd.DataFrame) -> None:
     st.divider()
 
 
+def _reports_section() -> None:
+    """Read + download the paper-ready report, figures, and Excel workbook."""
+    report = DOCS / "RESULTS_REPORT.md"
+    xlsx = DOCS / "benchmark_results.xlsx"
+    by_system = DOCS / "benchmark_by_system.xlsx"
+    figs = sorted((DOCS / "figures").glob("*.png")) if (DOCS / "figures").exists() else []
+    if not (report.exists() or xlsx.exists() or figs):
+        return
+
+    _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    st.subheader("📄 Report & downloads")
+    c1, c2, c3 = st.columns(3)
+    if xlsx.exists():
+        c1.download_button(
+            "⬇ Excel — full workbook",
+            data=xlsx.read_bytes(),
+            file_name="benchmark_results.xlsx",
+            mime=_XLSX_MIME,
+            key="dl_xlsx_main",
+        )
+    if by_system.exists():
+        c2.download_button(
+            "⬇ Excel — per memory system",
+            data=by_system.read_bytes(),
+            file_name="benchmark_by_system.xlsx",
+            mime=_XLSX_MIME,
+            key="dl_xlsx_bysystem",
+        )
+    if report.exists():
+        c3.download_button(
+            "⬇ Report (.md)",
+            data=report.read_text(encoding="utf-8"),
+            file_name="RESULTS_REPORT.md",
+            mime="text/markdown",
+            key="dl_report_md",
+        )
+
+    if report.exists():
+        with st.expander("Read the full results report", expanded=False):
+            text = report.read_text(encoding="utf-8")
+            # st.markdown can't load the report's relative figure paths, so render
+            # the text and drop the figures in explicitly below.
+            st.markdown(text)
+            for fp in figs:
+                st.image(str(fp), caption=fp.name, use_container_width=True)
+    elif figs:
+        with st.expander("Figures", expanded=False):
+            for fp in figs:
+                st.image(str(fp), caption=fp.name, use_container_width=True)
+    st.divider()
+
+
 def main() -> None:
     st.title("Memory Agent Benchmark Dashboard")
 
@@ -392,6 +445,7 @@ def main() -> None:
 
     df = _load_all()
     _study_header(df)
+    _reports_section()
     _progress_panel()
     st.divider()
 
@@ -458,6 +512,10 @@ def main() -> None:
 
     # ---- Leaderboard ----
     st.subheader("Leaderboard")
+    st.caption(
+        "Ranks memory systems, aggregated across **all** LLM backbones in the dataset. "
+        "For a per-backbone breakdown see the Model comparison section below."
+    )
     leaderboard = _load_csv("leaderboard.csv")
     if not leaderboard.empty:
         st.dataframe(leaderboard, use_container_width=True)
@@ -469,8 +527,70 @@ def main() -> None:
             use_container_width=True,
         )
 
+    # ---- Model comparison (RQ3: how the LLM backbone affects each system) ----
+    st.subheader("Model comparison — memory system × LLM backbone (RQ3)")
+    mm = _load_csv("summary_by_memory_model.csv")
+    if not mm.empty and "model" in mm.columns:
+        # Respect the sidebar model filter if the user narrowed it.
+        if "model_display" in view.columns:
+            keep = set(view["model_display"].astype(str))
+            if keep:
+                mm = mm[mm["model"].astype(str).isin(keep)]
+    if not mm.empty and "model" in mm.columns:
+        gain_col = "memory_utility_gain_vs_stateless"
+        st.caption(
+            "Every memory system evaluated under each LLM backbone. progress_score and "
+            "gain-vs-stateless are the primary metrics (higher = better). This is the cross-model "
+            "view — the per-system tables below reflect whatever models are selected in the sidebar."
+        )
+        # Per-model scorecard: mean progress + mean gain across memory systems.
+        models = sorted(mm["model"].astype(str).unique())
+        for col, mdl in zip(st.columns(len(models)), models):
+            sub = mm[mm["model"].astype(str) == mdl]
+            ps = sub["progress_score"].mean() if "progress_score" in sub else float("nan")
+            gv = (
+                sub[sub["memory_system"] != "stateless"][gain_col].mean()
+                if gain_col in sub else float("nan")
+            )
+            col.metric(mdl, f"progress {ps:.3f}", f"mean gain {gv:+.3f}")
+        show_cols = [c for c in [
+            "memory_system", "model", "n", "progress_score", "mean_score", gain_col,
+            "consistency_score", "pass_at_3", "mean_cost_usd", "mean_latency_ms",
+        ] if c in mm.columns]
+        st.dataframe(
+            mm[show_cols].round(3).sort_values(["memory_system", "model"]),
+            use_container_width=True,
+        )
+        _csv_download(mm, "summary_by_memory_model.csv",
+                      "⬇ Download model comparison (CSV)", "dl_modelcmp")
+        if "progress_score" in mm.columns:
+            st.plotly_chart(
+                px.bar(mm.sort_values("memory_system"), x="memory_system", y="progress_score",
+                       color="model", barmode="group",
+                       labels={"progress_score": "progress score", "model": "LLM backbone"}),
+                use_container_width=True,
+            )
+        if gain_col in mm.columns:
+            g = mm[mm["memory_system"] != "stateless"]
+            st.plotly_chart(
+                px.bar(g.sort_values("memory_system"), x="memory_system", y=gain_col,
+                       color="model", barmode="group",
+                       labels={gain_col: "gain vs stateless", "model": "LLM backbone"}),
+                use_container_width=True,
+            )
+        _details("Model comparison", [
+            "memory_system", "progress_score", "memory_utility_gain_vs_stateless",
+            "consistency_score", "pass_at_3", "mean_cost_usd", "mean_latency_ms",
+        ])
+    else:
+        st.caption("Model comparison appears once results are aggregated (`make aggregate`).")
+
     # ---- Paper-ready per-system summary (Section III-H) ----
     st.subheader("Per-system summary (paper metrics)")
+    st.caption(
+        "Paper §III-H metrics per memory system, aggregated across **all** models. "
+        "Use the Model comparison section for the per-backbone split."
+    )
     paper = _load_csv("paper_table.csv")
     if not paper.empty:
         st.dataframe(paper.round(3), use_container_width=True)
@@ -492,12 +612,24 @@ def main() -> None:
     st.subheader("Learning curve — mean score by subtask position (within task)")
     trend = _load_csv("subtask_trend.csv")
     if not trend.empty:
-        st.plotly_chart(
-            px.line(trend.sort_values("subtask_index"), x="subtask_index", y="mean_score",
-                    color="memory_system", markers=True,
-                    labels={"subtask_index": "subtask position", "mean_score": "mean score"}),
-            use_container_width=True,
+        trend = trend.sort_values("subtask_index")
+        facet = None
+        # Map the model slot (from the raw-event path) to its display name and,
+        # when >1 model is present, show one small-multiple per model backbone.
+        if "model" in trend.columns and {"model", "model_display"} <= set(view.columns):
+            slot2disp = dict(zip(view["model"].astype(str), view["model_display"].astype(str)))
+            trend["model_display"] = trend["model"].map(slot2disp).fillna(trend["model"])
+            keep = set(view["model_display"].astype(str))
+            if keep:
+                trend = trend[trend["model_display"].isin(keep)]
+            if not trend.empty and trend["model_display"].nunique() > 1:
+                facet = "model_display"
+        fig = px.line(
+            trend, x="subtask_index", y="mean_score", color="memory_system",
+            markers=True, facet_col=facet,
+            labels={"subtask_index": "subtask position", "mean_score": "mean score"},
         )
+        st.plotly_chart(fig, use_container_width=True)
         st.caption(
             "Within-task performance across sequential subtasks (the paper's 'improvement over "
             "time'). The repeated runs use isolated memory per seed, so they capture variance, not "
