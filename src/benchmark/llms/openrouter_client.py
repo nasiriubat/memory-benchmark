@@ -148,8 +148,10 @@ class OpenRouterClient(LLMClient):
         params: dict[str, Any] = {"model": self.resolved_model, "messages": messages}
         stripped: list[str] = []
 
-        # temperature
-        if supports("temperature"):
+        # temperature (None = configured "do not send": some endpoints, e.g.
+        # Anthropic Claude Opus 4.8, reject the parameter as deprecated even
+        # while the catalog still lists it as supported)
+        if self.temperature is not None and supports("temperature"):
             params["temperature"] = self.temperature
         else:
             stripped.append("temperature")

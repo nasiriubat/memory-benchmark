@@ -272,6 +272,21 @@ class Runner:
             strategy=self.config.run.task_sample_strategy,
             seed=self.config.run.benchmark_task_seed,
         )
+        # Optional surgical filter for targeted re-runs (e.g. recovering lost
+        # event logs for specific tasks): keep only the listed task ids. Applied
+        # AFTER normal sampling so the task pool is identical to a full run.
+        only_ids = {
+            t.strip() for t in os.environ.get("BENCHMARK_ONLY_TASK_IDS", "").split(",")
+            if t.strip()
+        }
+        if only_ids:
+            selected = {
+                domain: [t for t in tasks if str(t.id) in only_ids]
+                for domain, tasks in selected.items()
+            }
+            _log.info("BENCHMARK_ONLY_TASK_IDS=%s -> kept %s",
+                      sorted(only_ids),
+                      {d: len(ts) for d, ts in selected.items() if ts})
         counts = {domain: len(tasks) for domain, tasks in selected.items() if tasks}
         _log.info(
             "Benchmark '%s': max_tasks_total=%d strategy=%s seed=%d -> %s",

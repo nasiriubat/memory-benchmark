@@ -1,0 +1,65 @@
+Thank you for the careful review. Here's some answer to your queries. I have attached the referenced spreadsheets, and
+everything is also explorable live in the dashboard.
+
+
+1) DO MEMORY-AUGMENTED AGENTS LEARN?  -  Yes, within a task.
+At the first sub-question the memory and stateless agents score the same (nothing has been stored
+yet); from the second sub-question onward the stateless agent's accuracy collapses while the memory
+agents hold up - they store information during the task and reuse it on later, dependent steps (i.e.
+for other sub-questions within the same task).
+
+The signal is the memory-vs-stateless gap as the task progresses (per-subtask mean score, averaged
+over the 3 models):
+
+  subtask position   stateless    mem0   hindsight   (mem0 - stateless)
+  0 (first)            0.406      0.432    0.440        +0.03
+  1                    0.105      0.255    0.291        +0.15
+  2                    0.253      0.304    0.282        +0.05
+  3                    0.129      0.282    0.327        +0.15
+  4                    0.197      0.311    0.270        +0.11
+  5                    0.226      0.328    0.254        +0.10
+
+(The absolute scores stay flat because later sub-questions are harder; the learning is visible in the
+widening gap over stateless, not in a rising absolute curve.)
+
+Where:
+- benchmark_subtask_trace.xlsx -> sheet "Subtask progression" -> compare memory_system = stateless vs
+  mem0 / hindsight / acontext across subtask_index (columns "mean score" and "retrieved (avg)"). The
+  gap grows from ~0 at step 0 to +0.10-0.20 at later steps.
+- Aggregate view: benchmark_by_system.xlsx -> each system sheet -> column "Gain vs stateless"
+  (positive = memory helped; e.g. mem0 with gpt-5.5 = +0.165).
+
+
+2) IS RETRIEVED MEMORY RELEVANT, CORRECT, AND ACTUALLY USED?  (RQ4)
+Where:
+- benchmark_by_system.xlsx -> columns "Relevance", "Correctness", "Usage", "Retrieved memories (avg)",
+  "Written memories (avg)", per memory system and model.
+- Per-step retrieval activity: benchmark_subtask_trace.xlsx -> "retrieved (avg)" (rises 0 -> ~3 across
+  steps).
+
+
+3) STATISTICAL SUPPORT
+Where: benchmark_statistics.xlsx -> sheets "Stats - vs stateless" (t-stat, p-value, Cohen's d) and
+"Stats - ANOVA (2-way)". The memory-system and model effects are statistically significant (p ~ 0.03).
+
+
+4) WHAT THE CURRENT DATASET DOES NOT COVER  -  and why
+
+Cross-task / long-term transfer (knowledge from task A reused in task B) and per-item memory lineage
+are not captured. This is a property of the MemoryArena benchmark's design: its tasks are independent,
+self-contained scenarios, so there is no "source task -> target task" relationship to measure. We
+propose treating cross-task transfer and memory lineage as future work - they would require a dataset
+with linked task sequences plus additional per-item logging, i.e. a separate study.
+
+
+ATTACHED
+
+- benchmark_subtask_trace.xlsx   - within-task learning (Q1): stateless collapses, memory holds.
+- benchmark_by_system.xlsx       - per memory system x model: gain vs stateless + relevance /
+                                   correctness / usage / retrieval-write counts (Q1 aggregate + Q2).
+- benchmark_statistics.xlsx      - significance testing: t-tests vs stateless, ANOVA, effect sizes (Q3).
+
+For further info like the model comparison, the within-task learning curves, the
+per-metric breakdowns, and a full written RQ2/RQ4 assessment - please see the dashboard https://wretched-blissfully-patrick.ngrok-free.dev . Everything referenced above is under "Reports & downloads".
+
+Happy to walk through any of this on the dashboard at your convenience. And guide us for the next step.

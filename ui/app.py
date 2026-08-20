@@ -373,52 +373,45 @@ def _study_header(df: pd.DataFrame) -> None:
 def _reports_section() -> None:
     """Read + download the paper-ready report, figures, and Excel workbook."""
     report = DOCS / "RESULTS_REPORT.md"
+    rq = DOCS / "RQ_ASSESSMENT.md"
     xlsx = DOCS / "benchmark_results.xlsx"
     by_system = DOCS / "benchmark_by_system.xlsx"
+    trace = DOCS / "benchmark_subtask_trace.xlsx"
     figs = sorted((DOCS / "figures").glob("*.png")) if (DOCS / "figures").exists() else []
     if not (report.exists() or xlsx.exists() or figs):
         return
 
-    _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    st.subheader("📄 Report & downloads")
-    c1, c2, c3 = st.columns(3)
+    xm = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    st.subheader("📄 Reports & downloads")
+
+    # Excel workbooks.
+    x1, x2, x3 = st.columns(3)
     if xlsx.exists():
-        c1.download_button(
-            "⬇ Excel — full workbook",
-            data=xlsx.read_bytes(),
-            file_name="benchmark_results.xlsx",
-            mime=_XLSX_MIME,
-            key="dl_xlsx_main",
-        )
+        x1.download_button("⬇ Excel — full workbook", xlsx.read_bytes(),
+                           "benchmark_results.xlsx", xm, key="dl_xlsx_main")
     if by_system.exists():
-        c2.download_button(
-            "⬇ Excel — per memory system",
-            data=by_system.read_bytes(),
-            file_name="benchmark_by_system.xlsx",
-            mime=_XLSX_MIME,
-            key="dl_xlsx_bysystem",
-        )
+        x2.download_button("⬇ Excel — per memory system", by_system.read_bytes(),
+                           "benchmark_by_system.xlsx", xm, key="dl_xlsx_bysystem")
+    if trace.exists():
+        x3.download_button("⬇ Excel — subtask trace", trace.read_bytes(),
+                           "benchmark_subtask_trace.xlsx", xm, key="dl_xlsx_trace")
+    # Markdown docs.
+    m1, m2 = st.columns(2)
     if report.exists():
-        c3.download_button(
-            "⬇ Report (.md)",
-            data=report.read_text(encoding="utf-8"),
-            file_name="RESULTS_REPORT.md",
-            mime="text/markdown",
-            key="dl_report_md",
-        )
+        m1.download_button("⬇ Results report (.md)", report.read_text(encoding="utf-8"),
+                           "RESULTS_REPORT.md", "text/markdown", key="dl_report_md")
+    if rq.exists():
+        m2.download_button("⬇ RQ2/RQ4 assessment (.md)", rq.read_text(encoding="utf-8"),
+                           "RQ_ASSESSMENT.md", "text/markdown", key="dl_rq_md")
 
     if report.exists():
         with st.expander("Read the full results report", expanded=False):
-            text = report.read_text(encoding="utf-8")
-            # st.markdown can't load the report's relative figure paths, so render
-            # the text and drop the figures in explicitly below.
-            st.markdown(text)
+            st.markdown(report.read_text(encoding="utf-8"))
             for fp in figs:
                 st.image(str(fp), caption=fp.name, use_container_width=True)
-    elif figs:
-        with st.expander("Figures", expanded=False):
-            for fp in figs:
-                st.image(str(fp), caption=fp.name, use_container_width=True)
+    if rq.exists():
+        with st.expander("Read the RQ2/RQ4 data-support assessment", expanded=False):
+            st.markdown(rq.read_text(encoding="utf-8"))
     st.divider()
 
 

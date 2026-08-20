@@ -48,7 +48,9 @@ class ResolvedModel:
     supported_parameters: list[str] = field(default_factory=list)
     pricing: dict[str, Any] = field(default_factory=dict)
     catalog_created_at: str | None = None
-    temperature: float = 0.0
+    # None means "do not send the parameter" (some endpoints, e.g. Anthropic
+    # Claude Opus 4.8, reject temperature as deprecated).
+    temperature: float | None = 0.0
     max_output_tokens: int = 4096
     reasoning: dict[str, Any] = field(default_factory=dict)
 
@@ -67,7 +69,8 @@ class ResolvedModel:
             supported_parameters=list(data.get("supported_parameters", []) or []),
             pricing=data.get("pricing", {}) or {},
             catalog_created_at=data.get("catalog_created_at"),
-            temperature=float(data.get("temperature", 0.0)),
+            temperature=(None if data.get("temperature", 0.0) is None
+                         else float(data.get("temperature", 0.0))),
             max_output_tokens=int(data.get("max_output_tokens", 4096)),
             reasoning=data.get("reasoning", {}) or {},
         )
@@ -184,7 +187,8 @@ class ModelResolver:
             resolved_model=fallback,
             available=False,
             catalog_created_at=catalog_created_at or None,
-            temperature=float(spec.get("temperature", 0.0)),
+            temperature=(None if spec.get("temperature", 0.0) is None
+                         else float(spec.get("temperature", 0.0))),
             max_output_tokens=int(spec.get("max_output_tokens", 4096)),
             reasoning=spec.get("reasoning", {}) or {},
         )
