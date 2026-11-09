@@ -54,7 +54,7 @@ DEFS = [
     ("correct (rate)", "Fraction of subtasks judged fully correct at this position."),
     ("SCOPE", "WITHIN-task activity across subtasks q0..qN. Memory is isolated per task, so this does "
               "NOT show cross-task transfer, sessions, or which specific memory item was reused "
-              "(memory ids/text are not logged). See RQ_ASSESSMENT for what the data does/does not cover."),
+              "(memory ids/text are not logged)."),
 ]
 
 

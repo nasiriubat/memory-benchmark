@@ -14,10 +14,6 @@ mechanism — not to the model, the tasks, or an internal helper LLM.
   `run_id / benchmark / domain / memory_system / model / task_id / seed`. Repeated runs use distinct
   seeds, so iterations never contaminate each other.
 
-> The detailed operational runbook for the **current campaign** is [RUNBOOK.md](RUNBOOK.md).
-
----
-
 ## Prerequisites
 
 - **Docker** + **Docker Compose v2**. That's it — everything runs in containers.
@@ -37,7 +33,7 @@ The `.env` already ships with a cost-efficient, correct default config (see [Con
 **AContext only:** it runs as its own 6-service stack and needs a secrets file
 `acontext_server/.env` (gitignored) with `OPENAI_API_KEY`, `ACONTEXT_ROOT_TOKEN`,
 `ROOT_SECRET_PEPPER`. `make acontext` starts the stack automatically; if that file is missing it
-errors with instructions. See [RUNBOOK.md](RUNBOOK.md) → "AContext setup". The default-project SDK
+errors with instructions. The default-project SDK
 key is `sk-ac-<ACONTEXT_ROOT_TOKEN>`, already wired as `ACONTEXT_API_KEY` in this project's `.env`.
 
 ---

@@ -108,7 +108,7 @@ services:
     command: python scripts/run_memory_system.py --memory-system acontext
     # AContext is NOT managed by this compose (it has its own 6-service stack
     # brought up by `acontext server up`). We reach its host-published API at
-    # :8029 via host.docker.internal. Bring AContext up first (see RUNBOOK).
+    # :8029 via host.docker.internal. Bring AContext up first (see README).
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -234,7 +234,7 @@ services:
   # host.docker.internal:8029. Bring it up with:
   #   cd acontext_server && docker compose --env-file .env up -d
   # The default-project SDK key is sk-ac-<ROOT_API_BEARER_TOKEN> (already set as
-  # ACONTEXT_API_KEY in .env). See RUNBOOK "AContext setup".
+  # ACONTEXT_API_KEY in .env). See README "Installation" for AContext setup.
 
 
   # === Aggregation =========================================================

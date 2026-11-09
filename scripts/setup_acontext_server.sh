@@ -16,7 +16,7 @@ AC_ENV="${AC_DIR}/.env"
 if [[ ! -f "${AC_ENV}" ]]; then
   echo ">> ERROR: ${AC_ENV} is missing (it holds the AContext secrets and is gitignored)." >&2
   echo "          Recreate it with OPENAI_API_KEY, ACONTEXT_ROOT_TOKEN, ROOT_SECRET_PEPPER." >&2
-  echo "          See RUNBOOK 'AContext setup'." >&2
+  echo "          See README 'Installation' (AContext only)." >&2
   exit 1
 fi
 

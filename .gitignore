@@ -85,9 +85,6 @@ Desktop.ini
 *.sublime-project
 *.sublime-workspace
 
-# Cursor local agent state (keep committed rules if you add them under .cursor/rules/)
-.cursor/
-
 # --- Docker (local overrides only) --------------------------------------------
 docker-compose.override.yml
 docker-compose.local.yml
