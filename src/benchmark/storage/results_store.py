@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -53,9 +54,21 @@ class ResultsStore:
         """
         line = json.dumps(result.model_dump(), default=str) + "\n"
         row = result.flatten()
+        # Cloud-synced filesystems (e.g. OneDrive) intermittently reject the append
+        # with EAGAIN/EDEADLK. A dropped RESULT row is bad, so retry generously; the
+        # backoff sleep is OUTSIDE the lock so it never blocks other worker threads.
+        for attempt in range(15):
+            try:
+                with self._lock:
+                    with self._jsonl.open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                break
+            except OSError as exc:
+                if attempt == 14:
+                    _log.error("RESULT ROW DROPPED after retries (%s): %s", self._jsonl, exc)
+                    break
+                time.sleep(0.03 * (attempt + 1))
         with self._lock:
-            with self._jsonl.open("a", encoding="utf-8") as fh:
-                fh.write(line)
             self._rows.append(row)
 
     def flush_tabular(self) -> None:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -107,9 +108,23 @@ class EventLogger:
             "payload": payload or {},
         }
         line = json.dumps(event, default=str)
-        with self._lock:
-            with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
+        # Cloud-synced filesystems (e.g. OneDrive) intermittently reject the
+        # append with EAGAIN/EDEADLK ("Resource deadlock avoided") while their own
+        # sync process holds the file. Retry briefly, then drop this one diagnostic
+        # line rather than crash the run. IMPORTANT: only the file write is under
+        # the lock; the backoff sleep is OUTSIDE it so a stall on one thread does
+        # not block the other worker threads (that throttled the whole run).
+        for attempt in range(4):
+            try:
+                with self._lock:
+                    with self._path.open("a", encoding="utf-8") as fh:
+                        fh.write(line + "\n")
+                return
+            except OSError as exc:
+                if attempt == 3:
+                    self._log.warning("event log line dropped (%s): %s", self._path, exc)
+                    return
+                time.sleep(0.02 * (attempt + 1))
 
     def error(self, message: str, *, context: dict[str, Any] | None = None, **kwargs: Any) -> None:
         """Convenience: log an error to both console and the JSONL stream."""

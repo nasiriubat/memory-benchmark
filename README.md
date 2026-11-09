@@ -5,18 +5,14 @@ A reproducible, Docker-managed harness that compares **LLM-agent memory systems*
 mechanism — not to the model, the tasks, or an internal helper LLM.
 
 - **Memory systems (all real, self-hosted):** `stateless` (baseline), `hindsight`, `mem0`, `zep`,
-  `acontext`. (`supermemory` is **dropped** — its backend is closed-source / enterprise-only; the
-  adapter is kept but disabled in `configs/memory_systems.yaml`.)
+  `acontext`. (Supermemory from the paper's Table I is **not evaluated** — its backend is
+  closed-source and self-hosting is enterprise-only, so it is omitted rather than stubbed.)
 - **LLM provider (this branch):** **direct OpenAI**. Agent = `gpt-5.5` at `reasoning.effort: medium`;
   LLM judge = cheap `gpt-4o-mini`; memory-system internal extraction = `gpt-4o-mini` (consistent &
   cheap). An OpenRouter multi-provider path also exists — see [Multi-provider](#multi-provider-openrouter).
 - **Strict isolation:** every memory read/write is namespaced by
   `run_id / benchmark / domain / memory_system / model / task_id / seed`. Repeated runs use distinct
   seeds, so iterations never contaminate each other.
-
-> The detailed operational runbook for the **current campaign** is [RUNBOOK.md](RUNBOOK.md).
-
----
 
 ## Prerequisites
 
@@ -37,7 +33,7 @@ The `.env` already ships with a cost-efficient, correct default config (see [Con
 **AContext only:** it runs as its own 6-service stack and needs a secrets file
 `acontext_server/.env` (gitignored) with `OPENAI_API_KEY`, `ACONTEXT_ROOT_TOKEN`,
 `ROOT_SECRET_PEPPER`. `make acontext` starts the stack automatically; if that file is missing it
-errors with instructions. See [RUNBOOK.md](RUNBOOK.md) → "AContext setup". The default-project SDK
+errors with instructions. The default-project SDK
 key is `sk-ac-<ACONTEXT_ROOT_TOKEN>`, already wired as `ACONTEXT_API_KEY` in this project's `.env`.
 
 ---

@@ -47,6 +47,10 @@ def aggregate(results_root: Path) -> pd.DataFrame:
     analysis.leaderboard(df).to_csv(out_dir / "leaderboard.csv", index=False)
     analysis.failure_categories(df).to_csv(out_dir / "failure_categories.csv", index=False)
 
+    # Paper-ready per-system summary (Section III-H metrics) + RQ2 learning curve.
+    analysis.paper_summary(df).to_csv(out_dir / "paper_table.csv", index=False)
+    analysis.subtask_trend(results_root).to_csv(out_dir / "subtask_trend.csv", index=False)
+
     # The eight aggregation views.
     views_dir = ensure_dir(out_dir / "views")
     for name, view in analysis.aggregation_views(df).items():

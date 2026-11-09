@@ -41,7 +41,7 @@ class StubMemoryAdapter(MemoryAdapter):
         # ``# REAL SDK:`` markers below): they always serve operations from the
         # local store. Record that honestly so results are never mistaken for a
         # measurement of the real backend, even when it was detected.
-        self.uses_local_fallback = True
+        self._unavailable_fallback = True
         if not self.available:
             self.log.warning(
                 "%s adapter unavailable (%s). Falling back to local namespace-isolated "

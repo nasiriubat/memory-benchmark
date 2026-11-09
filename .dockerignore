@@ -49,7 +49,6 @@ docs/
 Thumbs.db
 .idea/
 .vscode/
-.cursor/
 *.swp
 *~
 

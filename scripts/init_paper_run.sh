@@ -49,12 +49,11 @@ Paper campaign ready (profile: paper, max_tasks_per_domain=50, num_runs=5).
 
 Suggested run order (your plan: hindsight first, then baseline + others):
   make build
-  make hindsight
   make stateless
+  make hindsight
   make acontext
   make mem0
   make zep
-  make supermemory
   make aggregate
 
 Memory utility vs stateless fills in after stateless completes; re-run

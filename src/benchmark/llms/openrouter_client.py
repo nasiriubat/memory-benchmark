@@ -148,8 +148,10 @@ class OpenRouterClient(LLMClient):
         params: dict[str, Any] = {"model": self.resolved_model, "messages": messages}
         stripped: list[str] = []
 
-        # temperature
-        if supports("temperature"):
+        # temperature (None = configured "do not send": some endpoints, e.g.
+        # Anthropic Claude Opus 4.8, reject the parameter as deprecated even
+        # while the catalog still lists it as supported)
+        if self.temperature is not None and supports("temperature"):
             params["temperature"] = self.temperature
         else:
             stripped.append("temperature")
@@ -196,6 +198,12 @@ class OpenRouterClient(LLMClient):
             provider_pref["data_collection"] = self.provider_policy["data_collection"]
         if self.provider_policy.get("sort"):
             provider_pref["sort"] = self.provider_policy["sort"]
+        # Exclude / prefer specific upstream providers (e.g. skip Amazon Bedrock
+        # when it is disabled for the account and returns "organization disabled").
+        if self.provider_policy.get("ignore"):
+            provider_pref["ignore"] = self.provider_policy["ignore"]
+        if self.provider_policy.get("order"):
+            provider_pref["order"] = self.provider_policy["order"]
         if provider_pref:
             extra_body["provider"] = provider_pref
 

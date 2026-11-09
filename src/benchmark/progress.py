@@ -16,13 +16,15 @@ import pandas as pd
 from benchmark.utils import results_root
 
 # Canonical run order (stateless first — baseline for memory-utility gain).
+# NOTE: zep is excluded — its self-hosted backend (legacy Zep 0.27) never started
+# ("store.type must be set") and the adapter's zep_python v2 client is API-
+# incompatible with a v1 server, so every run fell back to the local store. See
+# results/EXCLUDED_zep_fallback/ for the preserved (invalid) runs.
 MEMORY_SYSTEMS_ORDER: list[str] = [
     "stateless",
     "hindsight",
     "acontext",
     "mem0",
-    "zep",
-    "supermemory",
 ]
 
 Status = Literal["pending", "running", "done", "failed"]

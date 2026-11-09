@@ -20,10 +20,20 @@ openrouter:
   fail_if_model_unavailable: false
   strict_benchmark_mode: true
   provider:
-    allow_fallbacks: false
+    # Allow routing to another provider of the SAME model when the first is
+    # unavailable (Amazon Bedrock is disabled for this account), so e.g.
+    # claude-sonnet-5 routes to Anthropic/Google/Azure instead of failing.
+    allow_fallbacks: true
     require_parameters: true
     data_collection: "deny"
     sort: null
+    # Skip Amazon Bedrock everywhere: it returns "This organization has been
+    # disabled" (status -2) for this account.
+    # Skip Azure for the same reason the original campaigns ran Anthropic-direct:
+    # Azure's Claude endpoint rejects the `temperature` parameter
+    # ("`temperature` is deprecated for this model", 400), breaking runs that
+    # pin temperature=0.
+    ignore: ["Amazon Bedrock", "Azure"]
 
 # Models/routing patterns that must NOT be used for controlled experiments.
 forbidden_for_benchmark:

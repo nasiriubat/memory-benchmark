@@ -65,8 +65,6 @@ x-benchmark-env: &benchmark-env
   MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-gpt-4o-mini}
   ZEP_BASE_URL: ${ZEP_BASE_URL:-http://zep:8000}
   ZEP_API_KEY: ${ZEP_API_KEY:-}
-  SUPERMEMORY_BASE_URL: ${SUPERMEMORY_BASE_URL:-http://supermemory:8000}
-  SUPERMEMORY_API_KEY: ${SUPERMEMORY_API_KEY:-}
 
 x-benchmark-base: &benchmark-base
   build:
@@ -110,7 +108,7 @@ services:
     command: python scripts/run_memory_system.py --memory-system acontext
     # AContext is NOT managed by this compose (it has its own 6-service stack
     # brought up by `acontext server up`). We reach its host-published API at
-    # :8029 via host.docker.internal. Bring AContext up first (see RUNBOOK).
+    # :8029 via host.docker.internal. Bring AContext up first (see README).
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -135,16 +133,6 @@ services:
     depends_on:
       - zep-backend
 
-  supermemory:
-    <<: *benchmark-base
-    profiles: ["supermemory"]
-    environment:
-      <<: *benchmark-env
-      MEMORY_SYSTEM: supermemory
-    command: python scripts/run_memory_system.py --memory-system supermemory
-    depends_on:
-      - supermemory-backend
-
   # === Self-hosted memory backends (internal-only ports via `expose`) ======
   # mem0 uses a self-hosted Qdrant vector store.
   mem0-qdrant:
@@ -166,7 +154,8 @@ services:
 
   # Zep Community Edition + its Postgres (self-hosted, internal only).
   zep-postgres:
-    image: postgres:16-alpine
+    # Zep 0.27 stores embeddings via pgvector, so plain postgres is not enough.
+    image: pgvector/pgvector:pg16
     profiles: ["zep"]
     networks:
       - benchnet
@@ -188,19 +177,26 @@ services:
     networks:
       - benchnet
     environment:
+      # Zep 0.27.x config keys map to ZEP_<UPPER_SNAKE> env vars.
+      ZEP_STORE_TYPE: postgres
       ZEP_STORE_POSTGRES_DSN: postgres://zep:zep@zep-postgres:5432/zep?sslmode=disable
-      # Zep CE runs its own LLM extraction. Exact env keys vary by Zep image
-      # version; these cover the common graphiti-based CE config. Adjust to match
-      # your image. Uses the same OpenAI key as the benchmark by default.
+      ZEP_AUTH_REQUIRED: "false"
+      ZEP_SERVER_PORT: "8000"
+      # Use OpenAI for LLM + embeddings so no local NLP sidecar is required.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ZEP_LLM_SERVICE: openai
       ZEP_LLM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      MODEL_NAME: ${ZEP_LLM_MODEL:-gpt-4o-mini}
+      ZEP_LLM_MODEL: ${ZEP_LLM_MODEL:-gpt-4o-mini}
+      ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_SERVICE: openai
+      ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_DIMENSIONS: "1536"
+      ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_SERVICE: openai
+      ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_DIMENSIONS: "1536"
     expose:
       - "8000"
     depends_on:
       - zep-postgres
 
-  # Hindsight / AContext / Supermemory self-hosted services.
+  # Hindsight / AContext self-hosted services.
   # These reference local build contexts under ./selfhosted/<system> if you
   # vendor the upstream repos; otherwise the adapter logs "unavailable" and
   # degrades gracefully. Replace `image`/`build` with the real upstream as
@@ -238,20 +234,8 @@ services:
   # host.docker.internal:8029. Bring it up with:
   #   cd acontext_server && docker compose --env-file .env up -d
   # The default-project SDK key is sk-ac-<ROOT_API_BEARER_TOKEN> (already set as
-  # ACONTEXT_API_KEY in .env). See RUNBOOK "AContext setup".
+  # ACONTEXT_API_KEY in .env). See README "Installation" for AContext setup.
 
-  supermemory-backend:
-    image: ${SUPERMEMORY_IMAGE:-ghcr.io/supermemoryai/supermemory:latest}
-    # Starts together with the `supermemory` runner (was a separate profile that
-    # never came up with the runner). NOTE: the default image ref above is a
-    # placeholder and is NOT publicly pullable — set SUPERMEMORY_IMAGE to a real
-    # image (or a local build context) before running this profile.
-    profiles: ["supermemory"]
-    container_name: supermemory
-    networks:
-      - benchnet
-    expose:
-      - "8000"
 
   # === Aggregation =========================================================
   aggregator:
@@ -267,6 +251,13 @@ services:
     profiles: ["ui"]
     environment:
       <<: *benchmark-env
+    # Also mount docs/ so the dashboard can read + serve the report, figures,
+    # and the Excel workbook (kept in docs/ for the UI).
+    volumes:
+      - ./results:/app/results
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./docs:/app/docs
     command: streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
     ports:
       - "8501:8501"

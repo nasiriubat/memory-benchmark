@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+import textwrap
 from pathlib import Path
 
 import pandas as pd
@@ -23,6 +24,129 @@ if str(_SRC) not in sys.path:
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 AGG = RESULTS / "aggregated"
+DOCS = Path(__file__).resolve().parents[1] / "docs"
+
+# Columns that are always-null or pure clutter on the current OpenAI + MemoryArena
+# setup. Hidden from the drill-down and the filtered downloads; the raw
+# per-system results.jsonl keeps every field.
+_DROP_COLS = {
+    "rule_compliance", "ux_score", "error", "model_unavailable_reason",
+    "openrouter_model_catalog_created_at", "openrouter_generation_id",
+    "openrouter_request_id", "openrouter_supported_parameters",
+    "openrouter_provider_policy", "openrouter_model_pricing",
+    "practical_correctness", "usefulness", "dfx_constraint_adherence",
+    "reasoning_clarity", "engineering_applicability",
+    "model_slot", "cached_input_tokens", "memory_store_size_bytes",
+}
+
+
+def _curated(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop always-null / clutter columns for display + download."""
+    return df[[c for c in df.columns if c not in _DROP_COLS]]
+
+
+# Plain-language definitions for every metric/column shown, aligned to the paper
+# (Section III-H). Surfaced via a "Details" button next to each table/chart.
+_GLOSSARY: dict[str, str] = {
+    "rank": "Position, ranked by progress score then memory-utility gain.",
+    "memory_system": "The memory mechanism under test (stateless = no-memory baseline).",
+    "model": "LLM backbone used (this run: gpt-5.5).",
+    "model_display": "Concrete resolved model id.",
+    "models_used": "LLM backbone(s) present in this group.",
+    "benchmark": "Benchmark suite (memoryarena).",
+    "domain": "Task config within the benchmark (bundled_shopping).",
+    "task_id": "Task identifier.",
+    "seed": "Repeat index — each seed is an independent run with isolated memory (measures variance, not learning).",
+    "n": "Number of result rows in the group (tasks x seeds).",
+    "progress_score": "PRIMARY. Fraction of a task's subtasks judged correct (correct / total). The paper's partial-completion metric (PS).",
+    "score": "Mean of the per-subtask LLM-judge correctness scores (0-1).",
+    "mean_score": "Mean of the per-subtask LLM-judge correctness scores (0-1).",
+    "success": "Full-task success: 1 only if EVERY subtask is correct. Near-zero on hard tasks - read progress score instead.",
+    "full_task_success": "1 only if EVERY subtask in the task is correct (all-or-nothing). Near-zero on hard tasks.",
+    "task_success_rate": "Mean full-task success (every subtask correct) across the group.",
+    "pass_at_k": "Fraction of tasks solved in at least one of the k repeated runs (reliability across seeds); k = num_runs.",
+    "memory_utility_gain_vs_stateless": "PRIMARY. This system's score minus the matched stateless row's (same task+seed). Positive = memory helped.",
+    "gain_vs_stateless": "This system's score minus the matched stateless score (same task+seed). Positive = memory helped.",
+    "consistency": "1 - contradictions against the per-task fact ledger (staying consistent with earlier decisions/constraints).",
+    "consistency_score": "1 - contradictions against the per-task fact ledger.",
+    "relevance": "Judge: were the retrieved memories relevant to the current question? (blank for stateless - no retrieval).",
+    "memory_relevance_score": "Judge: were the retrieved memories relevant to the current question?",
+    "correctness": "Judge: were the retrieved memories factually correct vs the task's fact ledger?",
+    "memory_correctness_score": "Judge: were the retrieved memories factually correct vs the fact ledger?",
+    "usage": "Judge: did the agent actually use the retrieved memory in its answer?",
+    "memory_usage_score": "Judge: did the agent actually use the retrieved memory in its answer?",
+    "improvement_slope": "Slope of score across a task's sequential subtasks (the paper's 'improvement over time'). ~0/negative as later subtasks get harder.",
+    "subtask_index": "Position of the subtask within the task (0 = first). Later positions depend on remembering earlier ones.",
+    "retrieved": "Avg number of memory entries retrieved per task.",
+    "retrieved_memory_count": "Avg number of memory entries retrieved per task.",
+    "written": "Avg number of memory entries written per task.",
+    "written_memory_count": "Avg number of memory entries written per task.",
+    "total_cost_usd": "Avg USD per task = agent LLM cost + judge LLM cost.",
+    "mean_cost_usd": "Avg USD per task (agent + judge).",
+    "latency_ms": "Avg wall-clock ms per task.",
+    "mean_latency_ms": "Avg wall-clock ms per task.",
+    "total_tokens": "Avg agent input+output tokens per task.",
+    "failure_category": "Where the memory process failed (e.g. failed retrieval, incorrect use of retrieved memory) - paper's failure taxonomy.",
+    "count": "Number of occurrences.",
+}
+
+
+# Human-readable label + plain-English cause for each failure taxonomy value
+# (paper Section III-K). The chart shows the short label; the full explanation is
+# in the bar hover text and the list below the chart. Covers every FailureCategory
+# in src/benchmark/schemas.py so future runs render regardless of which fire.
+_FAILURE_LABELS: dict[str, str] = {
+    "missing_memory_write": "No memory written",
+    "irrelevant_memory_write": "Irrelevant memory written",
+    "failed_retrieval": "Nothing retrieved",
+    "incorrect_or_outdated_retrieval": "Wrong/outdated memory retrieved",
+    "incorrect_use_of_retrieved_memory": "Retrieved but not used",
+    "over_reliance_on_prior_feedback": "Over-relied on prior feedback",
+    "inconsistency_across_iterations": "Inconsistent across runs",
+    "model_reasoning_error": "Model reasoning error",
+    "tool_use_error": "Tool-use error",
+    "benchmark_environment_error": "Environment/backend error",
+    "unknown": "Unknown",
+}
+_FAILURE_EXPLAIN: dict[str, str] = {
+    "missing_memory_write": "Task failed and the system stored nothing — no memory to learn from.",
+    "irrelevant_memory_write": "The system wrote memories, but they were off-topic for the task.",
+    "failed_retrieval": "Memories existed but retrieval returned nothing for the query.",
+    "incorrect_or_outdated_retrieval": "Retrieved memories were factually wrong or stale (memory-correctness < 0.5).",
+    "incorrect_use_of_retrieved_memory": (
+        "Correct memories were retrieved, but the agent barely grounded its answer in them "
+        "(memory-usage < 0.3) — typically because what was retrieved wasn't relevant to the "
+        "specific subtask (low retrieval relevance), so the agent ignored it and answered wrong."
+    ),
+    "over_reliance_on_prior_feedback": "The agent leaned too hard on earlier feedback instead of the current task.",
+    "inconsistency_across_iterations": "Answers varied across repeated runs of the same task (consistency < 0.5).",
+    "model_reasoning_error": "Memory worked, but the model reasoned to the wrong answer.",
+    "tool_use_error": "The agent misused a tool while solving the task.",
+    "benchmark_environment_error": "An error/crash in the backend or harness, not a memory decision.",
+    "unknown": "Failure that didn't match any specific taxonomy branch.",
+}
+
+
+def _details(label: str, keys: Any) -> None:
+    """A 'Details' button next to a table/chart explaining each metric shown."""
+    def _defn(k: str) -> str | None:
+        if k in _GLOSSARY:
+            return _GLOSSARY[k]
+        # Dynamic pass@k column (e.g. "pass_at_3") maps to the generic entry.
+        if k.startswith("pass_at_") and k[len("pass_at_"):].isdigit():
+            return _GLOSSARY["pass_at_k"]
+        return None
+
+    lines = [f"- **{k}** — {_defn(k)}" for k in dict.fromkeys(keys) if _defn(k)]
+    if not lines:
+        return
+    try:
+        box = st.popover(f"ℹ️ Details — {label}")
+    except Exception:  # older streamlit without popover
+        box = st.expander(f"ℹ️ Details — {label}")
+    with box:
+        st.markdown("\n".join(lines))
+
 
 st.set_page_config(page_title="Memory Agent Benchmark Dashboard", layout="wide")
 
@@ -35,6 +159,23 @@ def _load_csv(name: str) -> pd.DataFrame:
         except Exception:  # noqa: BLE001
             return pd.DataFrame()
     return pd.DataFrame()
+
+
+def _csv_download(df: pd.DataFrame, filename: str, label: str, key: str) -> None:
+    """Offer a DataFrame as a downloadable CSV (no-op when empty).
+
+    Used to let a reviewer grab each paper-ready aggregated table directly.
+    Streamlit needs a unique key per download button on the page.
+    """
+    if df is None or df.empty:
+        return
+    st.download_button(
+        label,
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=filename,
+        mime="text/csv",
+        key=key,
+    )
 
 
 def _load_from_per_system() -> pd.DataFrame:
@@ -104,7 +245,7 @@ source scripts/init_run.sh     # sets RUN_ID
 make ui                        # dashboard (terminal 1)
 make stateless                 # then each system, same RUN_ID
 make hindsight
-# ... mem0, zep, supermemory
+# ... mem0, zep, acontext
 make aggregate
 ```
 
@@ -170,19 +311,137 @@ def _metric_card(col, label: str, series: pd.Series, fmt: str = "{:.3f}") -> Non
     col.metric(label, value)
 
 
+def _study_header(df: pd.DataFrame) -> None:
+    """Brief description of the experiment (dynamic facts + a details expander)."""
+
+    def _uniq(col: str, fallback: str) -> str:
+        if df.empty or col not in df.columns:
+            return fallback
+        vals = sorted({str(x) for x in df[col].dropna().unique()})
+        return ", ".join(vals) if vals else fallback
+
+    benchmark = _uniq("benchmark", "memoryarena")
+    domain = _uniq("domain", "bundled_shopping")
+    systems = _uniq("memory_system", "stateless, hindsight, mem0, zep, acontext")
+    model = _uniq("model_display", _uniq("resolved_model", "gpt-5.5"))
+    n_tasks = int(df["task_id"].nunique()) if (not df.empty and "task_id" in df) else 0
+    n_seeds = int(df["seed"].nunique()) if (not df.empty and "seed" in df) else 0
+
+    st.markdown(
+        "**Memory Matters** — evaluating how different **memory mechanisms** affect an "
+        "LLM agent's learning behavior on iterative, interdependent tasks. Every memory system "
+        "runs the *same* tasks through *one* agent pipeline; a **stateless** agent is the baseline, "
+        "and we measure whether memory improves performance on later, memory-dependent steps."
+    )
+    st.markdown(
+        f"- **Benchmark / dataset:** `{benchmark}` — config `{domain}` "
+        f"(HuggingFace `ZexueHe/memoryarena`): a multi-turn shopping task where each purchase step "
+        f"depends on remembering earlier decisions, budget, and constraints.\n"
+        f"- **Sample:** {n_tasks} tasks × {n_seeds} repeated runs (random sample, seed 42).\n"
+        f"- **Memory systems:** {systems}. Here **`stateless`** is the no-memory baseline "
+        f"(control); the others each add a memory mechanism and are measured against it.\n"
+        f"- **Agent model:** {model} (reasoning effort: medium). **LLM judge:** gpt-4o-mini "
+        f"(grades answer correctness + memory-use quality; memory-system extraction also gpt-4o-mini).\n"
+        f"- **Primary metrics:** **progress score** (correct subtasks / total) and **memory-utility "
+        f"gain vs stateless**. Full-task success is all-or-nothing, so it is near-zero on this hard task."
+    )
+    with st.expander("Full study details & research questions"):
+        st.markdown(
+            "This study integrates existing memory mechanisms into a single agentic pipeline and "
+            "compares them under identical tasks (a factorial design over memory system × LLM "
+            "backbone × iteration depth). The goal is not a new memory mechanism, but a controlled "
+            "comparison of existing ones.\n\n"
+            "**Research questions**\n"
+            "- **RQ1** — How do different memory mechanisms influence agent performance and learning "
+            "behavior on iterative, interdependent tasks?\n"
+            "- **RQ2** — Do memory-augmented agents improve over repeated interactions and transfer "
+            "knowledge, compared with a stateless agent?\n"
+            "- **RQ3** — How does the choice of LLM backbone affect memory-based learning?\n"
+            "- **RQ4** — How effectively do agents *retrieve* and *use* stored memory (relevance, "
+            "correctness, usage)?\n\n"
+            "**Scoring.** Answers are graded by an LLM judge — deterministic token overlap cannot "
+            "score MemoryArena's structured (product-ID) answers. **Memory-utility gain** joins each "
+            "memory-system row to the matched stateless row (same task + seed) and is computed at "
+            "`make aggregate`. The **learning curve** below (mean score by subtask position) shows the "
+            "stateless agent degrading on later steps while memory systems hold up.\n\n"
+            "*Note:* the repeated runs use isolated memory per seed (they measure variance/consistency, "
+            "not cross-run learning); within-task learning is the subtask-position trend."
+        )
+    st.divider()
+
+
+def _reports_section() -> None:
+    """Read + download the paper-ready report, figures, and Excel workbook."""
+    report = DOCS / "RESULTS_REPORT.md"
+    rq = DOCS / "RQ_ASSESSMENT.md"
+    xlsx = DOCS / "benchmark_results.xlsx"
+    by_system = DOCS / "benchmark_by_system.xlsx"
+    trace = DOCS / "benchmark_subtask_trace.xlsx"
+    figs = sorted((DOCS / "figures").glob("*.png")) if (DOCS / "figures").exists() else []
+    if not (report.exists() or xlsx.exists() or figs):
+        return
+
+    xm = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    st.subheader("📄 Reports & downloads")
+
+    # Excel workbooks.
+    x1, x2, x3 = st.columns(3)
+    if xlsx.exists():
+        x1.download_button("⬇ Excel — full workbook", xlsx.read_bytes(),
+                           "benchmark_results.xlsx", xm, key="dl_xlsx_main")
+    if by_system.exists():
+        x2.download_button("⬇ Excel — per memory system", by_system.read_bytes(),
+                           "benchmark_by_system.xlsx", xm, key="dl_xlsx_bysystem")
+    if trace.exists():
+        x3.download_button("⬇ Excel — subtask trace", trace.read_bytes(),
+                           "benchmark_subtask_trace.xlsx", xm, key="dl_xlsx_trace")
+    # Markdown docs.
+    m1, m2 = st.columns(2)
+    if report.exists():
+        m1.download_button("⬇ Results report (.md)", report.read_text(encoding="utf-8"),
+                           "RESULTS_REPORT.md", "text/markdown", key="dl_report_md")
+    if rq.exists():
+        m2.download_button("⬇ RQ2/RQ4 assessment (.md)", rq.read_text(encoding="utf-8"),
+                           "RQ_ASSESSMENT.md", "text/markdown", key="dl_rq_md")
+
+    if report.exists():
+        with st.expander("Read the full results report", expanded=False):
+            st.markdown(report.read_text(encoding="utf-8"))
+            for fp in figs:
+                st.image(str(fp), caption=fp.name, use_container_width=True)
+    if rq.exists():
+        with st.expander("Read the RQ2/RQ4 data-support assessment", expanded=False):
+            st.markdown(rq.read_text(encoding="utf-8"))
+    st.divider()
+
+
 def main() -> None:
     st.title("Memory Agent Benchmark Dashboard")
 
-    if st.sidebar.checkbox("Auto-refresh (30s)", value=True):
+    # Auto-refresh is only useful while a campaign is still running. Once every
+    # tracked memory system is "done", pause it automatically (still toggleable).
+    try:
+        from benchmark.progress import load_status
+
+        _systems = (load_status(RESULTS).get("systems") or {}).values()
+        all_done = bool(_systems) and all(s.get("status") == "done" for s in _systems)
+    except Exception:  # noqa: BLE001
+        all_done = False
+
+    if all_done:
+        st.sidebar.caption("✅ All systems complete — live auto-refresh paused.")
+    if st.sidebar.checkbox("Auto-refresh (30s)", value=not all_done):
         st.markdown(
             '<meta http-equiv="refresh" content="30">',
             unsafe_allow_html=True,
         )
 
+    df = _load_all()
+    _study_header(df)
+    _reports_section()
     _progress_panel()
     st.divider()
 
-    df = _load_all()
     if df.empty:
         _empty_state()
         return
@@ -218,41 +477,167 @@ def main() -> None:
         return
 
     # ---- Metric cards ----
+    # Headline the graded per-subtask metrics (progress score + memory-utility
+    # gain). "Full-task success" is all-or-nothing across a task's ~6 subtasks, so
+    # it is near-zero on hard tasks and kept only as a secondary, labeled card.
     st.subheader("Headline metrics (filtered)")
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    _metric_card(c1, "Task success rate", view["success"].astype(float))
-    if "official_STATE_Bench_task_completion_pass_5" in view.columns:
-        _metric_card(c2, "pass@5", view["official_STATE_Bench_task_completion_pass_5"])
-    else:
-        _metric_card(c2, "pass@5 (success)", view["success"].astype(float))
-    _metric_card(c3, "Progress score", view["progress_score"])
-    _metric_card(c4, "Consistency", view.get("consistency_score", pd.Series(dtype=float)))
-    _metric_card(c5, "Memory utility gain",
+    _metric_card(c1, "Progress score", view["progress_score"])
+    _metric_card(c2, "Memory utility gain",
                  view.get("memory_utility_gain_vs_stateless", pd.Series(dtype=float)))
-    _metric_card(c6, "Cost / task", view["estimated_cost_usd"], fmt="${:.6f}")
+    _metric_card(c3, "Mean subtask score", view["score"])
+    _metric_card(c4, "Consistency", view.get("consistency_score", pd.Series(dtype=float)))
+    _metric_card(c5, "Full-task success (all subtasks)", view["success"].astype(float))
+    total_cost = view["total_cost_usd"] if "total_cost_usd" in view.columns else view["estimated_cost_usd"]
+    _metric_card(c6, "Total cost / task", total_cost, fmt="${:.6f}")
     _metric_card(c7, "Latency (ms)", view["latency_ms"], fmt="{:.0f}")
     st.caption(
-        "Memory utility gain is derived at aggregation (this row's score − the matched stateless "
-        "row's score). It is **null in the per-system `results.jsonl` by design** and is filled in "
-        "only after the `stateless` baseline has run on the same tasks and `make aggregate` has run; "
-        "in-progress / per-system-only runs show it empty."
+        "**Progress score** (correct subtasks / total) and **memory utility gain** (this row's score − "
+        "the matched stateless row's) are the primary metrics. **Full-task success** requires *every* "
+        "subtask correct, so it is near-zero on hard tasks — read progress/gain instead. Cost is agent + "
+        "judge. Memory utility gain is derived at `make aggregate` (needs the stateless baseline) and is "
+        "null in the per-system `results.jsonl` by design."
     )
+    _details("Headline metrics", [
+        "progress_score", "memory_utility_gain_vs_stateless", "score",
+        "consistency_score", "full_task_success", "total_cost_usd", "latency_ms",
+    ])
 
     # ---- Leaderboard ----
     st.subheader("Leaderboard")
+    st.caption(
+        "Ranks memory systems, aggregated across **all** LLM backbones in the dataset. "
+        "For a per-backbone breakdown see the Model comparison section below."
+    )
     leaderboard = _load_csv("leaderboard.csv")
     if not leaderboard.empty:
         st.dataframe(leaderboard, use_container_width=True)
+        _csv_download(leaderboard, "leaderboard.csv", "⬇ Download leaderboard (CSV)", "dl_leaderboard")
+        _details("Leaderboard", leaderboard.columns)
     else:
         st.dataframe(
             view.groupby("memory_system")["success"].mean().reset_index(),
             use_container_width=True,
         )
 
+    # ---- Model comparison (RQ3: how the LLM backbone affects each system) ----
+    st.subheader("Model comparison — memory system × LLM backbone (RQ3)")
+    mm = _load_csv("summary_by_memory_model.csv")
+    if not mm.empty and "model" in mm.columns:
+        # Respect the sidebar model filter if the user narrowed it.
+        if "model_display" in view.columns:
+            keep = set(view["model_display"].astype(str))
+            if keep:
+                mm = mm[mm["model"].astype(str).isin(keep)]
+    if not mm.empty and "model" in mm.columns:
+        gain_col = "memory_utility_gain_vs_stateless"
+        st.caption(
+            "Every memory system evaluated under each LLM backbone. progress_score and "
+            "gain-vs-stateless are the primary metrics (higher = better). This is the cross-model "
+            "view — the per-system tables below reflect whatever models are selected in the sidebar."
+        )
+        # Per-model scorecard: mean progress + mean gain across memory systems.
+        models = sorted(mm["model"].astype(str).unique())
+        for col, mdl in zip(st.columns(len(models)), models):
+            sub = mm[mm["model"].astype(str) == mdl]
+            ps = sub["progress_score"].mean() if "progress_score" in sub else float("nan")
+            gv = (
+                sub[sub["memory_system"] != "stateless"][gain_col].mean()
+                if gain_col in sub else float("nan")
+            )
+            col.metric(mdl, f"progress {ps:.3f}", f"mean gain {gv:+.3f}")
+        show_cols = [c for c in [
+            "memory_system", "model", "n", "progress_score", "mean_score", gain_col,
+            "consistency_score", "pass_at_3", "mean_cost_usd", "mean_latency_ms",
+        ] if c in mm.columns]
+        st.dataframe(
+            mm[show_cols].round(3).sort_values(["memory_system", "model"]),
+            use_container_width=True,
+        )
+        _csv_download(mm, "summary_by_memory_model.csv",
+                      "⬇ Download model comparison (CSV)", "dl_modelcmp")
+        if "progress_score" in mm.columns:
+            st.plotly_chart(
+                px.bar(mm.sort_values("memory_system"), x="memory_system", y="progress_score",
+                       color="model", barmode="group",
+                       labels={"progress_score": "progress score", "model": "LLM backbone"}),
+                use_container_width=True,
+            )
+        if gain_col in mm.columns:
+            g = mm[mm["memory_system"] != "stateless"]
+            st.plotly_chart(
+                px.bar(g.sort_values("memory_system"), x="memory_system", y=gain_col,
+                       color="model", barmode="group",
+                       labels={gain_col: "gain vs stateless", "model": "LLM backbone"}),
+                use_container_width=True,
+            )
+        _details("Model comparison", [
+            "memory_system", "progress_score", "memory_utility_gain_vs_stateless",
+            "consistency_score", "pass_at_3", "mean_cost_usd", "mean_latency_ms",
+        ])
+    else:
+        st.caption("Model comparison appears once results are aggregated (`make aggregate`).")
+
+    # ---- Paper-ready per-system summary (Section III-H) ----
+    st.subheader("Per-system summary (paper metrics)")
+    st.caption(
+        "Paper §III-H metrics per memory system, aggregated across **all** models. "
+        "Use the Model comparison section for the per-backbone split."
+    )
+    paper = _load_csv("paper_table.csv")
+    if not paper.empty:
+        st.dataframe(paper.round(3), use_container_width=True)
+        _csv_download(paper, "paper_table.csv", "⬇ Download paper summary table (CSV)", "dl_paper")
+        _details("Per-system summary", paper.columns)
+        if "gain_vs_stateless" in paper.columns:
+            st.subheader("Memory utility gain vs stateless")
+            gdf = paper[paper["memory_system"] != "stateless"].sort_values("gain_vs_stateless")
+            st.plotly_chart(
+                px.bar(gdf, x="memory_system", y="gain_vs_stateless",
+                       labels={"gain_vs_stateless": "score gain vs stateless"}),
+                use_container_width=True,
+            )
+            _details("Gain vs stateless chart", ["memory_system", "gain_vs_stateless"])
+    else:
+        st.caption("Run `make aggregate` to build the paper summary table.")
+
+    # RQ2 learning curve: mean score across sequential subtask positions.
+    st.subheader("Learning curve — mean score by subtask position (within task)")
+    trend = _load_csv("subtask_trend.csv")
+    if not trend.empty:
+        trend = trend.sort_values("subtask_index")
+        facet = None
+        # Map the model slot (from the raw-event path) to its display name and,
+        # when >1 model is present, show one small-multiple per model backbone.
+        if "model" in trend.columns and {"model", "model_display"} <= set(view.columns):
+            slot2disp = dict(zip(view["model"].astype(str), view["model_display"].astype(str)))
+            trend["model_display"] = trend["model"].map(slot2disp).fillna(trend["model"])
+            keep = set(view["model_display"].astype(str))
+            if keep:
+                trend = trend[trend["model_display"].isin(keep)]
+            if not trend.empty and trend["model_display"].nunique() > 1:
+                facet = "model_display"
+        fig = px.line(
+            trend, x="subtask_index", y="mean_score", color="memory_system",
+            markers=True, facet_col=facet,
+            labels={"subtask_index": "subtask position", "mean_score": "mean score"},
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Within-task performance across sequential subtasks (the paper's 'improvement over "
+            "time'). The repeated runs use isolated memory per seed, so they capture variance, not "
+            "cross-run learning."
+        )
+        _csv_download(trend, "subtask_trend.csv", "⬇ Download learning-curve data (CSV)", "dl_trend")
+        _details("Learning curve", ["subtask_index", "mean_score", "memory_system"])
+    else:
+        st.caption("Run `make aggregate` to build the learning curve.")
+
     # ---- Charts ----
     st.subheader("Score by memory system")
     by_sys = view.groupby("memory_system")["score"].mean().reset_index()
     st.plotly_chart(px.bar(by_sys, x="memory_system", y="score"), use_container_width=True)
+    _details("Score by memory system", ["memory_system", "score"])
 
     st.subheader("Memory system x model success rate (heatmap)")
     model_col = "model_display" if "model_display" in view.columns else "model"
@@ -265,27 +650,38 @@ def main() -> None:
             px.imshow(pivot, text_auto=".2f", aspect="auto", color_continuous_scale="Blues"),
             use_container_width=True,
         )
+        _details("Success heatmap", ["memory_system", "model_display", "success"])
 
     st.subheader("Progress score by iteration (seed)")
     if "seed" in view.columns:
-        trend = view.groupby(["memory_system", "seed"])["progress_score"].mean().reset_index()
+        seed_trend = view.groupby(["memory_system", "seed"])["progress_score"].mean().reset_index()
         st.plotly_chart(
-            px.line(trend, x="seed", y="progress_score", color="memory_system", markers=True),
+            px.line(seed_trend, x="seed", y="progress_score", color="memory_system", markers=True),
             use_container_width=True,
         )
+        _details("Progress by iteration", ["seed", "progress_score", "memory_system"])
 
     st.subheader("Cost vs success")
     model_col = "model_display" if "model_display" in view.columns else "model"
+    cost_col = "total_cost_usd" if "total_cost_usd" in view.columns else "estimated_cost_usd"
     cvs = view.groupby(["memory_system", model_col]).agg(
-        cost=("estimated_cost_usd", "mean"), success=("success", "mean")
+        cost=(cost_col, "mean"), progress_score=("progress_score", "mean")
     ).reset_index()
     st.plotly_chart(
-        px.scatter(cvs, x="cost", y="success", color="memory_system", symbol=model_col,
+        px.scatter(cvs, x="cost", y="progress_score", color="memory_system", symbol=model_col,
+                   labels={"cost": "total cost / task ($)"},
                    hover_data=["memory_system", model_col]),
         use_container_width=True,
     )
+    _details("Cost vs progress", ["total_cost_usd", "progress_score", "memory_system"])
 
-    st.subheader("Failure categories")
+    # ---- Failure taxonomy (paper Section III-K) ----
+    st.subheader("Failure taxonomy (paper §III-K)")
+    st.caption(
+        "Heuristic classification: each **failed** task is assigned a single reason, *derived* from "
+        "the measured sub-metrics (retrieval count, memory-correctness, memory-usage, consistency) — "
+        "it is a diagnostic label, not an independently measured metric. See the assignment rule below."
+    )
     fails = _load_csv("failure_categories.csv")
     if fails.empty and "failure_category" in view.columns:
         tmp = view[view["failure_category"].notna() & (view["failure_category"] != "")]
@@ -293,10 +689,56 @@ def main() -> None:
             fails = tmp.groupby(["memory_system", "failure_category"]).size().rename(
                 "count").reset_index()
     if not fails.empty:
-        st.plotly_chart(
-            px.bar(fails, x="failure_category", y="count", color="memory_system", barmode="group"),
-            use_container_width=True,
+        fails = fails.copy()
+        fails["reason"] = fails["failure_category"].map(_FAILURE_LABELS).fillna(
+            fails["failure_category"]
         )
+        fails["why"] = fails["failure_category"].map(_FAILURE_EXPLAIN).fillna("")
+        # Wrap the hover explanation so the tooltip stays readable.
+        fails["why_wrapped"] = fails["why"].apply(
+            lambda t: "<br>".join(textwrap.wrap(t, 60)) if t else ""
+        )
+        fig = px.bar(
+            fails,
+            x="reason",
+            y="count",
+            color="memory_system",
+            barmode="group",
+            custom_data=["why_wrapped"],
+            labels={"reason": "Failure reason", "count": "Failed tasks"},
+        )
+        fig.update_traces(
+            hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y} failed tasks"
+            "<br><br>%{customdata[0]}<extra></extra>"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        # Spell out every failure reason present in the current view.
+        present = [c for c in _FAILURE_LABELS if c in set(fails["failure_category"])]
+        st.markdown(
+            "**What each failure reason means**\n\n"
+            + "\n".join(
+                f"- **{_FAILURE_LABELS[c]}** — {_FAILURE_EXPLAIN[c]}" for c in present
+            )
+        )
+        with st.expander("How the failure reason is assigned (rule)"):
+            st.markdown(
+                "Each failed task is labelled by the first matching rule "
+                "(`_classify_failure`, runner.py) — measured signals in **bold**:\n\n"
+                "1. task raised an **error** → *Environment/backend error*\n"
+                "2. **retrieved = 0** and **written = 0** → *No memory written*\n"
+                "3. **retrieved = 0** → *Nothing retrieved*\n"
+                "4. **memory-correctness < 0.5** → *Wrong/outdated memory retrieved*\n"
+                "5. **memory-usage < 0.3** → *Retrieved but not used*\n"
+                "6. **consistency < 0.5** → *Inconsistent across runs*\n"
+                "7. otherwise → *Model reasoning error*"
+            )
+        _csv_download(
+            fails[["memory_system", "failure_category", "count"]],
+            "failure_categories.csv",
+            "⬇ Download failure taxonomy (CSV)",
+            "dl_failures",
+        )
+        _details("Failure categories", ["failure_category", "count", "memory_system"])
     else:
         st.caption("No failures recorded for the current selection.")
 
@@ -305,27 +747,30 @@ def main() -> None:
     drill_cols = [
         c
         for c in [
-            "task_id", "memory_system", "model_display", "model_slot", "requested_model",
-            "resolved_model", "benchmark", "domain", "seed",
-            "score", "progress_score", "retrieved_memory_count", "memory_usage_score",
-            "failure_category", "error",
+            "task_id", "memory_system", "model_display", "resolved_model",
+            "benchmark", "domain", "seed",
+            "progress_score", "score", "memory_utility_gain_vs_stateless",
+            "retrieved_memory_count", "written_memory_count", "memory_usage_score",
+            "total_cost_usd", "failure_category",
         ]
         if c in view.columns
     ]
     st.dataframe(view[drill_cols], use_container_width=True, height=350)
+    _details("Drill-down", drill_cols)
 
-    # ---- Downloads ----
+    # ---- Downloads (curated: clutter/always-null columns dropped) ----
     st.subheader("Download (filtered view)")
+    curated = _curated(view)
     d1, d2 = st.columns(2)
     d1.download_button(
         "Download CSV",
-        view.to_csv(index=False).encode("utf-8"),
+        curated.to_csv(index=False).encode("utf-8"),
         file_name="filtered_results.csv",
         mime="text/csv",
     )
     d2.download_button(
         "Download JSON",
-        json.dumps(view.to_dict(orient="records"), default=str).encode("utf-8"),
+        json.dumps(curated.to_dict(orient="records"), default=str).encode("utf-8"),
         file_name="filtered_results.json",
         mime="application/json",
     )

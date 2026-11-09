@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from typing import Any
 
 from benchmark.memory.base import MemoryAdapter
@@ -48,7 +49,7 @@ class ZepAdapter(MemoryAdapter):
         self._api_key = os.environ.get("ZEP_API_KEY", "")
         self.available, self.unavailable_reason = self._connect()
         if not self.available:
-            self.uses_local_fallback = True
+            self._unavailable_fallback = True
             self.log.warning(
                 "zep unavailable (%s). Using local namespace-isolated fallback.",
                 self.unavailable_reason,
@@ -69,13 +70,23 @@ class ZepAdapter(MemoryAdapter):
             return False, "pip package 'zep-python' not installed"
         if not self.base_url:
             return False, "ZEP_BASE_URL not configured"
-        try:
-            client = self._new_client()
-            client.user.list_ordered(page_size=1)  # health probe
-            self._tls.client = client
-        except Exception as exc:  # noqa: BLE001
-            return False, f"zep unreachable at {self.base_url}: {exc}"
-        return True, None
+        # Zep CE starts slowly (Postgres + schema migrations), so a single probe
+        # at init loses the race and trips the STICKY unavailable-fallback for the
+        # whole run. Poll the health endpoint for up to ~90s before giving up.
+        deadline_attempts = int(os.environ.get("ZEP_CONNECT_ATTEMPTS", "30"))
+        last_exc: Exception | None = None
+        for attempt in range(deadline_attempts):
+            try:
+                client = self._new_client()
+                client.user.list_ordered(page_size=1)  # health probe
+                self._tls.client = client
+                if attempt:
+                    self.log.info("zep ready after %d attempt(s)", attempt + 1)
+                return True, None
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                time.sleep(3.0)
+        return False, f"zep unreachable at {self.base_url} after {deadline_attempts} attempts: {last_exc}"
 
     def _client_for_thread(self) -> Any:
         if not self.available:
